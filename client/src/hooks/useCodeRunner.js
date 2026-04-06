@@ -1,7 +1,6 @@
 import { useState } from 'react'
 
 // Judge0 CE public instance — free, no API key required
-// Language IDs: https://ce.judge0.com/languages/
 const LANGUAGE_IDS = {
   javascript: 63,
   python:     71,
@@ -12,14 +11,13 @@ const LANGUAGE_IDS = {
 const BASE_URL = 'https://ce.judge0.com'
 
 export function useCodeRunner() {
-  const [output, setOutput] = useState('')
   const [isRunning, setIsRunning] = useState(false)
 
+  // Returns the output string instead of setting state internally
+  // so the caller (App.jsx) can sync it via Y.Map
   async function runCode(code, language) {
     setIsRunning(true)
-    setOutput('Running...')
 
-    // wait=true tells Judge0 to block until execution is done — no polling needed
     const res = await fetch(`${BASE_URL}/submissions?base64_encoded=false&wait=true`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -29,17 +27,13 @@ export function useCodeRunner() {
       }),
     })
 
-    if (!res.ok) {
-      setOutput(`API error: ${res.status}`)
-      setIsRunning(false)
-      return
-    }
+    setIsRunning(false)
+
+    if (!res.ok) return `API error: ${res.status}`
 
     const data = await res.json()
-    const out = data.stdout || data.stderr || data.compile_output || 'No output'
-    setOutput(out)
-    setIsRunning(false)
+    return data.stdout || data.stderr || data.compile_output || 'No output'
   }
 
-  return { runCode, output, isRunning }
+  return { runCode, isRunning }
 }
