@@ -1,16 +1,16 @@
 import { useState } from 'react'
 import Editor from './components/Editor'
+import { useCodeRunner } from './hooks/useCodeRunner'
 
 const LANGUAGES = ['javascript', 'python', 'java', 'cpp']
 
 export default function App() {
   const [language, setLanguage] = useState('javascript')
   const [code, setCode] = useState('')
-  const [output, setOutput] = useState('')
+  const { runCode, output, isRunning } = useCodeRunner()
 
   function handleRun() {
-    // Step 2: wire up Judge0 here
-    setOutput('Run not implemented yet')
+    runCode(code, language)
   }
 
   return (
@@ -28,8 +28,8 @@ export default function App() {
             <option key={lang} value={lang}>{lang}</option>
           ))}
         </select>
-        <button onClick={handleRun} style={styles.runButton}>
-          Run
+        <button onClick={handleRun} disabled={isRunning} style={styles.runButton}>
+          {isRunning ? 'Doodling...' : 'Run'}
         </button>
       </div>
 
@@ -45,7 +45,7 @@ export default function App() {
         <div style={styles.outputPanel}>
           <div style={styles.outputLabel}>Output</div>
           <pre style={styles.outputText}>
-            {output || 'Hit Run to see output here.'}
+            {output || 'Hit Run to see output here'}
           </pre>
         </div>
 
