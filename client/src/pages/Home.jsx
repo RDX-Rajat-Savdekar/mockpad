@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { generateRoomId, setUsername, getUsername } from '../utils/roomId'
+import FeaturesModal from '../components/FeaturesModal'
 
 const LANGUAGES = ['python', 'javascript', 'java', 'cpp']
 const INTERVIEW_TYPES = ['leetcode', 'system-design', 'behavioral', 'general']
@@ -11,11 +12,17 @@ export default function Home() {
   const [language, setLanguage] = useState('python')
   const [interviewType, setInterviewType] = useState('leetcode')
   const [name, setName] = useState(getUsername())
+  const [showFeatures, setShowFeatures] = useState(false)
 
   function handleCreate() {
     if (name.trim()) setUsername(name.trim())
     const id = generateRoomId()
     navigate(`/room/${id}?lang=${language}&type=${interviewType}`)
+  }
+
+  function handleDemo() {
+    if (name.trim()) setUsername(name.trim())
+    navigate(`/room/mockpad-demo?lang=python&type=leetcode&demo=1`)
   }
 
   function handleJoin(e) {
@@ -43,9 +50,19 @@ export default function Home() {
 
   return (
     <div style={styles.page}>
+      {showFeatures && (
+        <FeaturesModal
+          onClose={() => setShowFeatures(false)}
+          onDemo={() => { setShowFeatures(false); handleDemo() }}
+        />
+      )}
       <div style={styles.card}>
         <h1 style={styles.title}>MockPad</h1>
         <p style={styles.subtitle}>Free real-time collaborative code editor for mock interviews</p>
+
+        <button onClick={() => setShowFeatures(true)} style={styles.featuresLink}>
+          See how it works →
+        </button>
 
         {/* Username */}
         <input
@@ -198,6 +215,15 @@ const styles = {
     color: '#d4d4d4',
     fontSize: '14px',
     fontFamily: 'monospace',
+  },
+  featuresLink: {
+    background: 'none', border: 'none',
+    color: '#569cd6', fontSize: '13px',
+    cursor: 'pointer', fontFamily: 'monospace',
+    padding: 0, textAlign: 'center',
+    textDecoration: 'underline',
+    textDecorationColor: 'rgba(86,156,214,0.35)',
+    textUnderlineOffset: '3px',
   },
   joinBtn: {
     background: '#3c3c3c',

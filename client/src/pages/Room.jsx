@@ -12,6 +12,7 @@ import { getUserId, getUsername, getUserColor } from '../utils/roomId'
 import CountdownOverlay from '../components/CountdownOverlay'
 import TipsModal from '../components/TipsModal'
 import SummaryModal from '../components/SummaryModal'
+import FeaturesModal from '../components/FeaturesModal'
 
 function useVerticalResize(initial) {
   const [pcts, setPcts] = useState(initial)
@@ -67,6 +68,7 @@ export default function Room() {
   const [showCountdown, setShowCountdown] = useState(false)
   const [showTips, setShowTips] = useState(false)
   const [showSummary, setShowSummary] = useState(false)
+  const [showFeatures, setShowFeatures] = useState(false)
   const prevPeersLen = useRef(0)
   const wbApiRef = useRef(null)
 
@@ -152,6 +154,35 @@ export default function Room() {
         const type = searchParams.get('type') ?? 'leetcode'
         sharedMap.set('interviewType', type)
         setInterviewType(type)
+      }
+      // Seed demo room with sample content on first visit
+      if (searchParams.get('demo') === '1' && !sharedMap.get('demoSeeded')) {
+        sharedMap.set('demoSeeded', true)
+        sharedMap.set('timerDuration', 45 * 60 * 1000)
+        const demoCode = `# Two Sum — find indices of two numbers that add to target
+# Pattern: Hash map for O(n) lookup
+
+def two_sum(nums, target):
+    seen = {}               # value → index
+    for i, n in enumerate(nums):
+        complement = target - n
+        if complement in seen:
+            return [seen[complement], i]
+        seen[n] = i
+    return []
+
+# Test
+print(two_sum([2, 7, 11, 15], 9))   # [0, 1]
+print(two_sum([3, 2, 4], 6))        # [1, 2]`
+        yText.doc.transact(() => {
+          yText.delete(0, yText.length)
+          yText.insert(0, demoCode)
+        })
+        sharedMap.set(`sharedNotes-${MY_ID}`, {
+          name: MY_NAME,
+          role: 'interviewer',
+          text: `Clarify:\n- Return indices, not values\n- Each input has exactly one solution\n- Can't use same element twice\n\nBrute force: O(n²) — nested loops\nOptimal: O(n) — hash map\n\nFollow-ups:\n- What if sorted? → Two pointers\n- What if multiple solutions?`,
+        })
       }
     }
     provider.on('synced', onSynced)
@@ -330,6 +361,9 @@ export default function Room() {
 
         <div style={styles.spacer} />
 
+        <button onClick={() => setShowFeatures(true)} style={styles.iconBtn} title="Feature guide">
+          ?
+        </button>
         <button onClick={() => setShowResources(v => !v)} style={styles.iconBtn}>
           Resources
         </button>
@@ -416,6 +450,13 @@ export default function Room() {
         <TipsModal
           interviewType={interviewType}
           onDismiss={handleDismissTips}
+        />
+      )}
+
+      {showFeatures && (
+        <FeaturesModal
+          onClose={() => setShowFeatures(false)}
+          onDemo={() => setShowFeatures(false)}
         />
       )}
 
