@@ -34,7 +34,7 @@ function injectCursorStyles(awareness, doc) {
   return () => awareness.off('change', update)
 }
 
-export function useYjs(roomId, editor, username, color) {
+export function useYjs(roomId, editor, username, color, userId) {
   const docRef = useRef(null)
   if (!docRef.current) {
     docRef.current = new Y.Doc()
@@ -47,8 +47,8 @@ export function useYjs(roomId, editor, username, color) {
 
   // Set local user info on awareness whenever name/color changes
   useEffect(() => {
-    providerRef.current.awareness.setLocalStateField('user', { name: username, color })
-  }, [username, color])
+    providerRef.current.awareness.setLocalStateField('user', { name: username, color, userId })
+  }, [username, color, userId])
 
   useEffect(() => {
     if (!editor) return
@@ -73,6 +73,7 @@ export function useYjs(roomId, editor, username, color) {
   return {
     doc,
     provider,
+    awareness: provider.awareness,
     yText: doc.getText('monaco'),
   }
 }

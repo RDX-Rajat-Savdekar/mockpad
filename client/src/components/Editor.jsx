@@ -1,6 +1,6 @@
 import MonacoEditor from '@monaco-editor/react'
 
-export default function Editor({ language, onChange, onMount }) {
+export default function Editor({ language, onChange, onMount, readOnly = false }) {
   return (
     <MonacoEditor
       height="100%"
@@ -13,6 +13,7 @@ export default function Editor({ language, onChange, onMount }) {
         minimap: { enabled: false },
         scrollBeyondLastLine: false,
         wordWrap: 'on',
+        readOnly,
       }}
     />
   )

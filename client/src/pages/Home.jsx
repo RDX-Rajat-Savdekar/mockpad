@@ -22,17 +22,23 @@ export default function Home() {
     e.preventDefault()
     let id = joinId.trim()
     if (!id) return
+    let extraParams = ''
     // Accept full URLs or bare room IDs
     try {
       const url = new URL(id)
       const parts = url.pathname.split('/')
       id = parts[parts.length - 1]
+      // Preserve lang/type from the pasted link
+      const lang = url.searchParams.get('lang')
+      const type = url.searchParams.get('type')
+      const qs = [lang && `lang=${lang}`, type && `type=${type}`].filter(Boolean).join('&')
+      if (qs) extraParams = `?${qs}`
     } catch {
       // not a URL — treat as a bare room ID
     }
     if (!id) return
     if (name.trim()) setUsername(name.trim())
-    navigate(`/room/${id}`)
+    navigate(`/room/${id}${extraParams}`)
   }
 
   return (

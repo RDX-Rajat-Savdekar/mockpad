@@ -3,17 +3,13 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
 import Editor from '../components/Editor'
 import Timer from '../components/Timer'
-import { MyNotes, TheirNotes } from '../components/Notes'
-// import AudioControls from '../components/AudioControls' // TODO: fix WebRTC state
+import { NotesPanel } from '../components/Notes'
 import { useCodeRunner } from '../hooks/useCodeRunner'
 import { useYjs } from '../hooks/useYjs'
-// import { useWebRTC } from '../hooks/useWebRTC' // TODO: fix WebRTC state
 import { getUserId, getUsername, getUserColor } from '../utils/roomId'
 
-// Simple vertical drag-resize for N stacked panels.
-// Returns heights as percentages and a mousedown handler for each divider.
 function useVerticalResize(initial) {
-  const [pcts, setPcts] = useState(initial) // e.g. [33, 34, 33]
+  const [pcts, setPcts] = useState(initial)
   const containerRef = useRef(null)
 
   const onDividerMouseDown = useCallback((dividerIndex, e) => {
@@ -58,12 +54,44 @@ export default function Room() {
   const [myRole, setMyRole] = useState('interviewee')
   const [editor, setEditor] = useState(null)
   const [connStatus, setConnStatus] = useState('connected')
-  const { pcts, containerRef, onDividerMouseDown } = useVerticalResize([35, 35, 30])
+  const [peers, setPeers] = useState([])
+  const [toast, setToast] = useState(null) // { msg, key }
+  const toastTimer = useRef(null)
 
+  const { pcts, containerRef, onDividerMouseDown } = useVerticalResize([45, 55])
   const { runCode, isRunning } = useCodeRunner()
-  const { doc, provider, yText } = useYjs(roomId, editor, MY_NAME, MY_COLOR)
+  const { doc, provider, awareness, yText } = useYjs(roomId, editor, MY_NAME, MY_COLOR, MY_ID)
   const sharedMap = doc.getMap('shared')
-  // const { callState, isMuted, isRecording, startCall, endCall, toggleMute, startRecording, stopRecording } = useWebRTC(provider)
+
+  // Presence
+  useEffect(() => {
+    function update() {
+      const roles = sharedMap.get('roles') ?? {}
+      const seen = new Set()
+      const list = []
+      awareness.getStates().forEach((state) => {
+        const user = state.user
+        if (!user) return
+        const uid = user.userId
+        if (uid && seen.has(uid)) return
+        if (uid) seen.add(uid)
+        list.push({
+          name: user.name ?? 'Anonymous',
+          color: user.color ?? '#888',
+          role: roles[uid] ?? 'viewer',
+          isMe: uid === MY_ID,
+        })
+      })
+      setPeers(list)
+    }
+    awareness.on('change', update)
+    sharedMap.observe(update)
+    update()
+    return () => {
+      awareness.off('change', update)
+      sharedMap.unobserve(update)
+    }
+  }, [awareness, sharedMap])
 
   // Reconnection status
   useEffect(() => {
@@ -72,7 +100,7 @@ export default function Room() {
     return () => provider.off('status', onStatus)
   }, [provider])
 
-  // Observe shared state changes
+  // Shared state changes
   useEffect(() => {
     function onMapChange() {
       const lang = sharedMap.get('language')
@@ -88,13 +116,16 @@ export default function Room() {
     return () => sharedMap.unobserve(onMapChange)
   }, [sharedMap])
 
-  // Assign role + seed defaults after Yjs syncs
+  // Role assignment + defaults after Yjs sync
   useEffect(() => {
     function onSynced() {
       const roles = sharedMap.get('roles') ?? {}
       if (!roles[MY_ID]) {
         const taken = Object.values(roles)
-        const role = taken.includes('interviewer') ? 'interviewee' : 'interviewer'
+        let role
+        if (!taken.includes('interviewer')) role = 'interviewer'
+        else if (!taken.includes('interviewee')) role = 'interviewee'
+        else role = 'viewer'
         sharedMap.set('roles', { ...roles, [MY_ID]: role })
         setMyRole(role)
       } else {
@@ -115,7 +146,31 @@ export default function Room() {
     return () => provider.off('synced', onSynced)
   }, [sharedMap, provider])
 
-  function handleMount(editorInstance) { setEditor(editorInstance) }
+  // Paste event toast
+  useEffect(() => {
+    function onMapChange(event) {
+      if (!event.changes.keys.has('pasteEvent')) return
+      const ev = sharedMap.get('pasteEvent')
+      if (!ev) return
+      showToast(`${ev.name} pasted ${ev.lines} line${ev.lines === 1 ? '' : 's'}`)
+    }
+    sharedMap.observe(onMapChange)
+    return () => sharedMap.unobserve(onMapChange)
+  }, [sharedMap])
+
+  function showToast(msg) {
+    clearTimeout(toastTimer.current)
+    setToast({ msg, key: Date.now() })
+    toastTimer.current = setTimeout(() => setToast(null), 3100)
+  }
+
+  function handleMount(editorInstance) {
+    setEditor(editorInstance)
+    editorInstance.onDidPaste((e) => {
+      const lines = e.range.endLineNumber - e.range.startLineNumber + 1
+      sharedMap.set('pasteEvent', { name: MY_NAME, lines, uid: MY_ID, t: Date.now() })
+    })
+  }
 
   function handleLanguageChange(lang) {
     setLanguage(lang)
@@ -127,10 +182,18 @@ export default function Room() {
     sharedMap.set('interviewType', type)
   }
 
+  function handleMyRoleChange(newRole) {
+    const roles = sharedMap.get('roles') ?? {}
+    sharedMap.set('roles', { ...roles, [MY_ID]: newRole })
+  }
+
   function handleRoleSwap() {
     const roles = sharedMap.get('roles') ?? {}
     const swapped = Object.fromEntries(
-      Object.entries(roles).map(([id, role]) => [id, role === 'interviewer' ? 'interviewee' : 'interviewer'])
+      Object.entries(roles).map(([id, role]) => [
+        id,
+        role === 'interviewer' ? 'interviewee' : role === 'interviewee' ? 'interviewer' : 'viewer',
+      ])
     )
     sharedMap.set('roles', swapped)
   }
@@ -155,14 +218,29 @@ export default function Room() {
 
       {/* Reconnection banner */}
       {connStatus !== 'connected' && (
-        <div style={styles.banner(connStatus)}>
+        <div style={styles.banner(connStatus)} className="conn-banner">
           {connStatus === 'connecting' ? '⏳ Reconnecting…' : '⚠ Disconnected — edits will sync when reconnected'}
         </div>
       )}
 
-      {/* Toolbar */}
-      <div style={styles.toolbar}>
+      {/* ── Row 1: room info ── */}
+      <div style={styles.toolbar1}>
         <span style={styles.logo}>MockPad</span>
+
+        <div style={styles.divider} />
+
+        {/* Presence */}
+        <div style={styles.presenceList}>
+          {peers.map((p, i) => (
+            <div key={p.name + i} className="peer-chip" style={styles.peerChip(p.isMe)}>
+              <span style={{ ...styles.dot, background: p.color }} />
+              <span style={styles.peerName}>{p.isMe ? 'You' : p.name}</span>
+              <span style={styles.peerRole(p.role)}>{p.role}</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={styles.spacer} />
 
         <select value={interviewType} onChange={(e) => handleTypeChange(e.target.value)} style={styles.select}>
           {INTERVIEW_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -173,64 +251,80 @@ export default function Room() {
         </select>
 
         <Timer sharedMap={sharedMap} />
+      </div>
 
+      {/* ── Row 2: user actions ── */}
+      <div style={styles.toolbar2}>
         <div style={styles.roleRow}>
           <span style={{ ...styles.dot, background: MY_COLOR }} />
-          <span style={styles.roleBadge(myRole)}>{MY_NAME} · {myRole}</span>
-          <button onClick={handleRoleSwap} style={styles.swapBtn}>⇄</button>
+          <span style={styles.nameLabel}>{MY_NAME}</span>
+          <select
+            value={myRole}
+            onChange={(e) => handleMyRoleChange(e.target.value)}
+            style={styles.roleBadge(myRole)}
+          >
+            <option value="interviewer">interviewer</option>
+            <option value="interviewee">interviewee</option>
+            <option value="viewer">viewer</option>
+          </select>
+          <button onClick={handleRoleSwap} title="Swap interviewer ↔ interviewee" style={styles.swapBtn}>⇄</button>
         </div>
 
-        {/* <AudioControls ... /> TODO: fix WebRTC state */}
+        <div style={styles.spacer} />
 
-        <button onClick={handleCopyLink} style={styles.ghostBtn}>Copy link</button>
-        <button onClick={handleReset} style={styles.ghostBtn}>Reset</button>
-        <button onClick={handleRun} disabled={isRunning} style={styles.runButton}>
-          {isRunning ? 'Running...' : 'Run'}
+        <button onClick={handleCopyLink} style={styles.iconBtn} title="Copy room link">
+          Copy link
+        </button>
+        <button onClick={handleReset} style={styles.iconBtn} title="Reset editor">
+          Reset
+        </button>
+        <button
+          onClick={handleRun}
+          disabled={isRunning}
+          className={isRunning ? 'run-pulse' : ''}
+          style={styles.runButton(isRunning)}
+        >
+          {isRunning ? 'Running…' : '▶ Run'}
         </button>
       </div>
 
       {/* Resizable main area */}
       <PanelGroup direction="horizontal" style={styles.main}>
 
-        {/* Editor — fills its panel fully */}
         <Panel defaultSize={60} minSize={25}>
           <div style={styles.fill}>
-            <Editor language={language} onMount={handleMount} />
+            <Editor language={language} onMount={handleMount} readOnly={myRole === 'viewer'} />
           </div>
         </Panel>
 
         <PanelResizeHandle style={styles.resizeHandleV} />
 
-        {/* Right panel — three sections stacked VERTICALLY with drag handles */}
         <Panel defaultSize={40} minSize={20}>
           <div style={styles.rightPanel} ref={containerRef}>
 
-            {/* 1. Output */}
             <div style={{ ...styles.section, height: `${pcts[0]}%` }}>
               <div style={styles.panelLabel}>Output</div>
               <pre style={styles.outputText}>{output || 'Hit Run to see output here'}</pre>
             </div>
 
-            {/* Drag handle between output and my notes */}
             <div style={styles.dragHandle} onMouseDown={(e) => onDividerMouseDown(0, e)} />
 
-            {/* 2. My Notes */}
             <div style={{ ...styles.section, height: `${pcts[1]}%` }}>
-              <MyNotes sharedMap={sharedMap} />
-            </div>
-
-            {/* Drag handle between my notes and their notes */}
-            <div style={styles.dragHandle} onMouseDown={(e) => onDividerMouseDown(1, e)} />
-
-            {/* 3. Their Notes */}
-            <div style={{ ...styles.section, height: `${pcts[2]}%` }}>
-              <TheirNotes sharedMap={sharedMap} />
+              <NotesPanel sharedMap={sharedMap} myRole={myRole} peers={peers} />
             </div>
 
           </div>
         </Panel>
 
       </PanelGroup>
+
+      {/* Paste toast */}
+      {toast && (
+        <div key={toast.key} className="toast" style={styles.toast}>
+          📋 {toast.msg}
+        </div>
+      )}
+
     </div>
   )
 }
@@ -252,107 +346,137 @@ const styles = {
     textAlign: 'center',
     flexShrink: 0,
   }),
-  toolbar: {
+
+  // ── Row 1: room info
+  toolbar1: {
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
-    padding: '8px 16px',
+    gap: '8px',
+    padding: '6px 14px',
     background: '#2d2d2d',
-    borderBottom: '1px solid #444',
-    flexWrap: 'wrap',
+    borderBottom: '1px solid #3a3a3a',
     flexShrink: 0,
+    minHeight: '40px',
   },
-  logo: { fontWeight: 'bold', fontSize: '16px', marginRight: 'auto' },
+  // ── Row 2: user actions
+  toolbar2: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '5px 14px',
+    background: '#252525',
+    borderBottom: '1px solid #444',
+    flexShrink: 0,
+    minHeight: '38px',
+  },
+
+  logo: { fontWeight: 'bold', fontSize: '15px', color: '#e0e0e0', flexShrink: 0, letterSpacing: '0.02em' },
+  divider: { width: '1px', height: '18px', background: '#444', flexShrink: 0 },
+  spacer: { flex: 1 },
+
   select: {
     background: '#3c3c3c',
     color: '#d4d4d4',
     border: '1px solid #555',
     borderRadius: '4px',
-    padding: '4px 8px',
-    fontSize: '13px',
-  },
-  roleRow: { display: 'flex', alignItems: 'center', gap: '6px' },
-  dot: { width: '8px', height: '8px', borderRadius: '50%', display: 'inline-block', flexShrink: 0 },
-  roleBadge: (role) => ({
+    padding: '3px 7px',
     fontSize: '12px',
-    padding: '3px 8px',
-    borderRadius: '4px',
-    background: role === 'interviewer' ? '#1a4a8a' : '#4a1a1a',
-    color: role === 'interviewer' ? '#7ab3f5' : '#f57a7a',
+    flexShrink: 0,
+  },
+
+  presenceList: { display: 'flex', gap: '5px', flexWrap: 'nowrap', overflow: 'hidden' },
+  peerChip: (isMe) => ({
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    padding: '2px 7px',
+    borderRadius: '20px',
+    background: isMe ? '#363636' : '#2a2a2a',
+    border: `1px solid ${isMe ? '#555' : '#383838'}`,
+    fontSize: '11px',
+    flexShrink: 0,
+    transition: 'opacity 0.2s',
+  }),
+  dot: { width: '7px', height: '7px', borderRadius: '50%', display: 'inline-block', flexShrink: 0 },
+  peerName: { color: '#ccc', fontFamily: 'monospace', fontSize: '11px' },
+  peerRole: (role) => ({
+    fontSize: '10px',
+    color: role === 'interviewer' ? '#7ab3f5' : role === 'interviewee' ? '#f57a7a' : '#666',
     fontWeight: 'bold',
   }),
+
+  roleRow: { display: 'flex', alignItems: 'center', gap: '6px' },
+  nameLabel: { fontSize: '12px', color: '#ccc' },
+  roleBadge: (role) => ({
+    fontSize: '11px',
+    padding: '2px 8px',
+    borderRadius: '4px',
+    border: 'none',
+    cursor: 'pointer',
+    background: role === 'interviewer' ? '#1a4a8a' : role === 'interviewee' ? '#4a1a1a' : '#2a2a2a',
+    color: role === 'interviewer' ? '#7ab3f5' : role === 'interviewee' ? '#f57a7a' : '#888',
+    fontWeight: 'bold',
+    fontFamily: 'monospace',
+    transition: 'background 0.25s, color 0.25s',
+  }),
   swapBtn: {
-    background: 'none', border: '1px solid #555', borderRadius: '4px',
-    color: '#aaa', fontSize: '13px', padding: '2px 7px', cursor: 'pointer',
+    background: 'none', border: '1px solid #444', borderRadius: '4px',
+    color: '#999', fontSize: '12px', padding: '2px 6px', cursor: 'pointer',
   },
-  ghostBtn: {
-    background: 'none', border: '1px solid #555', borderRadius: '4px',
-    color: '#aaa', fontSize: '13px', padding: '5px 10px', cursor: 'pointer',
+  iconBtn: {
+    background: 'none', border: '1px solid #444', borderRadius: '4px',
+    color: '#999', fontSize: '12px', padding: '4px 10px', cursor: 'pointer',
+    transition: 'border-color 0.15s, color 0.15s',
   },
-  runButton: {
-    background: '#0e7a0e', color: '#fff', border: 'none',
-    borderRadius: '4px', padding: '6px 16px', fontSize: '13px', cursor: 'pointer',
-  },
+  runButton: (running) => ({
+    background: running ? '#0a5a0a' : '#0e7a0e',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '4px',
+    padding: '5px 16px',
+    fontSize: '13px',
+    cursor: running ? 'default' : 'pointer',
+    fontWeight: 'bold',
+    transition: 'background 0.2s',
+  }),
+
   main: { flex: 1, overflow: 'hidden' },
-  // fill: makes children of Panel take full height — required by react-resizable-panels
-  fill: {
-    height: '100%',
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-  },
+  fill: { height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   resizeHandleV: {
-    width: '4px',
-    background: '#2a2a2a',
-    cursor: 'col-resize',
-    flexShrink: 0,
-    borderLeft: '1px solid #444',
-    borderRight: '1px solid #444',
-  },
-  resizeHandleH: {
-    height: '4px',
-    background: '#2a2a2a',
-    cursor: 'row-resize',
-    flexShrink: 0,
-    borderTop: '1px solid #444',
-    borderBottom: '1px solid #444',
+    width: '4px', background: '#2a2a2a', cursor: 'col-resize', flexShrink: 0,
+    borderLeft: '1px solid #444', borderRight: '1px solid #444',
   },
   rightPanel: {
-    height: '100%',
-    display: 'flex',
-    flexDirection: 'column',
-    borderLeft: '1px solid #444',
-    overflow: 'hidden',
+    height: '100%', display: 'flex', flexDirection: 'column',
+    borderLeft: '1px solid #444', overflow: 'hidden',
   },
-  // Each stacked section in the right panel
-  section: {
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-    flexShrink: 0,
-  },
-  // Gray visible drag handle between sections
+  section: { display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 },
   dragHandle: {
-    height: '6px',
-    background: '#3a3a3a',
-    cursor: 'row-resize',
-    flexShrink: 0,
-    borderTop: '1px solid #555',
-    borderBottom: '1px solid #555',
+    height: '5px', background: '#333', cursor: 'row-resize', flexShrink: 0,
+    borderTop: '1px solid #444', borderBottom: '1px solid #444',
   },
   panelLabel: {
-    padding: '8px 12px',
-    background: '#2d2d2d',
-    borderBottom: '1px solid #444',
-    fontSize: '12px',
-    color: '#888',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-    flexShrink: 0,
+    padding: '6px 12px', background: '#2d2d2d', borderBottom: '1px solid #444',
+    fontSize: '11px', color: '#888', textTransform: 'uppercase',
+    letterSpacing: '0.05em', flexShrink: 0,
   },
   outputText: {
-    flex: 1, padding: '12px', margin: 0,
-    fontSize: '13px', color: '#d4d4d4',
-    overflow: 'auto', whiteSpace: 'pre-wrap',
+    flex: 1, padding: '10px 12px', margin: 0,
+    fontSize: '12px', color: '#d4d4d4', overflow: 'auto', whiteSpace: 'pre-wrap',
+  },
+
+  toast: {
+    position: 'fixed',
+    bottom: '24px',
+    right: '24px',
+    background: '#2d2d2d',
+    border: '1px solid #555',
+    borderRadius: '8px',
+    padding: '10px 16px',
+    fontSize: '13px',
+    color: '#d4d4d4',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+    zIndex: 9999,
+    pointerEvents: 'none',
   },
 }

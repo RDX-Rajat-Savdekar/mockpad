@@ -7,3 +7,72 @@
 body {
   overflow: hidden;
 }
+
+/* ── Animations ──────────────────────────────────────── */
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeOutDown {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(6px); }
+}
+
+@keyframes slideDown {
+  from { max-height: 0; opacity: 0; }
+  to   { max-height: 48px; opacity: 1; }
+}
+
+@keyframes peerIn {
+  from { opacity: 0; transform: scale(0.75); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes runPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(14, 122, 14, 0.5); }
+  50%       { box-shadow: 0 0 0 7px rgba(14, 122, 14, 0); }
+}
+
+.peer-chip {
+  animation: peerIn 0.2s ease both;
+}
+
+.toast {
+  animation: fadeInUp 0.22s ease both, fadeOutDown 0.3s ease 2.7s forwards;
+}
+
+.conn-banner {
+  animation: slideDown 0.25s ease both;
+  overflow: hidden;
+}
+
+.run-pulse {
+  animation: runPulse 1.1s ease-in-out infinite;
+}
+
+@keyframes digitChange {
+  from { opacity: 0.2; transform: translateY(-4px); }
+  to   { opacity: 1;   transform: translateY(0); }
+}
+.digit-flip {
+  display: inline-block;
+  animation: digitChange 0.15s ease both;
+}
+
+@keyframes ringPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+.ring-running {
+  animation: ringPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes ringExpired {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.1; }
+}
+.ring-expired {
+  animation: ringExpired 0.45s ease-in-out 4;
+}

@@ -10,74 +10,45 @@ function savePrivateNotes(text) {
   localStorage.setItem(`mockpad-notes-${MY_ID}`, text)
 }
 
-// My private notes + share toggle
-export function MyNotes({ sharedMap }) {
+// Single tabbed panel — "You" tab is editable, one tab per other user who has shared.
+// Each tab label shows name + role.
+export function NotesPanel({ sharedMap, myRole, peers }) {
   const [myNotes, setMyNotes] = useState(loadPrivateNotes)
   const [isShared, setIsShared] = useState(false)
+  const [othersNotes, setOthersNotes] = useState({}) // { [userId]: { name, role, text } }
+  const [activeTab, setActiveTab] = useState(MY_ID)
 
-  function handleChange(e) {
-    const text = e.target.value
-    setMyNotes(text)
-    savePrivateNotes(text)
-    if (isShared) {
-      sharedMap.set(`sharedNotes-${MY_ID}`, { name: getUsername(), text })
-    }
-  }
+  // Sync isShared on mount (in case user refreshed while shared)
+  useEffect(() => {
+    setIsShared(sharedMap.has(`sharedNotes-${MY_ID}`))
+  }, [sharedMap])
 
-  function handleShare() {
-    sharedMap.set(`sharedNotes-${MY_ID}`, { name: getUsername(), text: myNotes })
-    setIsShared(true)
-  }
-
-  function handleUnshare() {
-    sharedMap.delete(`sharedNotes-${MY_ID}`)
-    setIsShared(false)
-  }
-
-  return (
-    <div style={styles.panel}>
-      <div style={styles.header}>
-        <span style={styles.label}>
-          My Notes {isShared && <span style={styles.sharedTag}>shared</span>}
-        </span>
-        <button
-          onClick={isShared ? handleUnshare : handleShare}
-          style={styles.shareBtn(isShared)}
-        >
-          {isShared ? 'Unshare' : 'Share'}
-        </button>
-      </div>
-      <textarea
-        value={myNotes}
-        onChange={handleChange}
-        placeholder="Private — only visible to you until shared..."
-        style={styles.textarea}
-        spellCheck={false}
-      />
-    </div>
-  )
-}
-
-// Read-only view of the other person's shared notes
-export function TheirNotes({ sharedMap }) {
-  const [theirNotes, setTheirNotes] = useState(null)
-
+  // Observe other users' shared notes
   useEffect(() => {
     function scan() {
-      let found = null
+      const next = {}
       sharedMap.forEach((value, key) => {
-        if (key.startsWith('sharedNotes-') && key !== `sharedNotes-${MY_ID}`) {
-          found = value
-        }
+        if (!key.startsWith('sharedNotes-') || key === `sharedNotes-${MY_ID}`) return
+        const uid = key.replace('sharedNotes-', '')
+        next[uid] = value
       })
-      setTheirNotes(found)
+      setOthersNotes(next)
     }
 
     function onMapChange(event) {
       event.changes.keys.forEach((change, key) => {
         if (!key.startsWith('sharedNotes-') || key === `sharedNotes-${MY_ID}`) return
-        if (change.action === 'delete') setTheirNotes(null)
-        else setTheirNotes(sharedMap.get(key) ?? null)
+        const uid = key.replace('sharedNotes-', '')
+        if (change.action === 'delete') {
+          setOthersNotes(prev => {
+            const next = { ...prev }
+            delete next[uid]
+            return next
+          })
+          setActiveTab(prev => prev === uid ? MY_ID : prev)
+        } else {
+          setOthersNotes(prev => ({ ...prev, [uid]: sharedMap.get(key) }))
+        }
       })
     }
 
@@ -86,14 +57,84 @@ export function TheirNotes({ sharedMap }) {
     return () => sharedMap.unobserve(onMapChange)
   }, [sharedMap])
 
-  if (!theirNotes) return null
+  function handleChange(e) {
+    const text = e.target.value
+    setMyNotes(text)
+    savePrivateNotes(text)
+    if (isShared) {
+      sharedMap.set(`sharedNotes-${MY_ID}`, { name: getUsername(), role: myRole, text })
+    }
+  }
+
+  function handleShare() {
+    sharedMap.set(`sharedNotes-${MY_ID}`, { name: getUsername(), role: myRole, text: myNotes })
+    setIsShared(true)
+  }
+
+  function handleUnshare() {
+    sharedMap.delete(`sharedNotes-${MY_ID}`)
+    setIsShared(false)
+  }
+
+  // Look up role color from peers list for tab styling
+  function roleColor(role) {
+    if (role === 'interviewer') return '#7ab3f5'
+    if (role === 'interviewee') return '#f57a7a'
+    return '#666'
+  }
+
+  const otherTabs = Object.entries(othersNotes)
 
   return (
     <div style={styles.panel}>
-      <div style={styles.header}>
-        <span style={styles.label}>{theirNotes.name}'s Notes</span>
+      {/* Tab bar */}
+      <div style={styles.tabBar}>
+        {/* My tab */}
+        <button
+          onClick={() => setActiveTab(MY_ID)}
+          style={styles.tab(activeTab === MY_ID)}
+        >
+          <span style={styles.tabName}>You</span>
+          <span style={{ ...styles.tabRole, color: roleColor(myRole) }}>{myRole}</span>
+          {isShared && <span style={styles.sharedDot} title="shared" />}
+        </button>
+
+        {/* Other users' tabs */}
+        {otherTabs.map(([uid, note]) => (
+          <button
+            key={uid}
+            onClick={() => setActiveTab(uid)}
+            style={styles.tab(activeTab === uid)}
+          >
+            <span style={styles.tabName}>{note.name}</span>
+            <span style={{ ...styles.tabRole, color: roleColor(note.role) }}>{note.role}</span>
+          </button>
+        ))}
+
+        {/* Share toggle pushed to the right */}
+        <div style={styles.tabSpacer} />
+        <button
+          onClick={isShared ? handleUnshare : handleShare}
+          style={styles.shareBtn(isShared)}
+        >
+          {isShared ? 'Unshare' : 'Share'}
+        </button>
       </div>
-      <pre style={styles.readonlyText}>{theirNotes.text || '(empty)'}</pre>
+
+      {/* Content */}
+      {activeTab === MY_ID ? (
+        <textarea
+          value={myNotes}
+          onChange={handleChange}
+          placeholder={isShared ? 'Visible to everyone in the room…' : 'Private — hit Share to let others see this…'}
+          style={styles.textarea}
+          spellCheck={false}
+        />
+      ) : (
+        <pre style={styles.readonlyText}>
+          {othersNotes[activeTab]?.text || '(empty)'}
+        </pre>
+      )}
     </div>
   )
 }
@@ -105,32 +146,47 @@ const styles = {
     flexDirection: 'column',
     overflow: 'hidden',
   },
-  header: {
+  tabBar: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '6px 12px',
     background: '#2d2d2d',
     borderBottom: '1px solid #444',
     flexShrink: 0,
+    overflowX: 'auto',
+    gap: '1px',
+    padding: '0 6px',
   },
-  label: {
-    fontSize: '11px',
-    color: '#888',
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
+  tab: (active) => ({
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
+    gap: '5px',
+    padding: '6px 10px',
+    background: active ? '#1e1e1e' : 'none',
+    border: 'none',
+    borderBottom: active ? '2px solid #569cd6' : '2px solid transparent',
+    cursor: 'pointer',
+    flexShrink: 0,
+    marginBottom: '-1px',
+  }),
+  tabName: {
+    fontSize: '12px',
+    color: '#ccc',
+    fontFamily: 'monospace',
   },
-  sharedTag: {
-    background: '#1a4a1a',
-    color: '#5a9a5a',
+  tabRole: {
     fontSize: '10px',
-    padding: '1px 5px',
-    borderRadius: '3px',
-    textTransform: 'lowercase',
+    fontWeight: 'bold',
+    fontFamily: 'monospace',
   },
+  sharedDot: {
+    width: '5px',
+    height: '5px',
+    borderRadius: '50%',
+    background: '#5a9a5a',
+    display: 'inline-block',
+    flexShrink: 0,
+  },
+  tabSpacer: { flex: 1 },
   shareBtn: (isShared) => ({
     background: 'none',
     border: `1px solid ${isShared ? '#555' : '#3a6a3a'}`,
@@ -139,6 +195,8 @@ const styles = {
     fontSize: '11px',
     padding: '2px 8px',
     cursor: 'pointer',
+    flexShrink: 0,
+    fontFamily: 'monospace',
   }),
   textarea: {
     flex: 1,
