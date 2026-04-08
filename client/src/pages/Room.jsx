@@ -2,11 +2,16 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
 import Editor from '../components/Editor'
+import Whiteboard from '../components/Whiteboard'
+import ResourceDrawer from '../components/ResourceDrawer'
 import Timer from '../components/Timer'
 import { NotesPanel } from '../components/Notes'
 import { useCodeRunner } from '../hooks/useCodeRunner'
 import { useYjs } from '../hooks/useYjs'
 import { getUserId, getUsername, getUserColor } from '../utils/roomId'
+import CountdownOverlay from '../components/CountdownOverlay'
+import TipsModal from '../components/TipsModal'
+import SummaryModal from '../components/SummaryModal'
 
 function useVerticalResize(initial) {
   const [pcts, setPcts] = useState(initial)
@@ -53,10 +58,17 @@ export default function Room() {
   const [interviewType, setInterviewType] = useState(searchParams.get('type') ?? 'leetcode')
   const [myRole, setMyRole] = useState('interviewee')
   const [editor, setEditor] = useState(null)
+  const [activePanel, setActivePanel] = useState('code')
+  const [showResources, setShowResources] = useState(false)
   const [connStatus, setConnStatus] = useState('connected')
   const [peers, setPeers] = useState([])
   const [toast, setToast] = useState(null) // { msg, key }
   const toastTimer = useRef(null)
+  const [showCountdown, setShowCountdown] = useState(false)
+  const [showTips, setShowTips] = useState(false)
+  const [showSummary, setShowSummary] = useState(false)
+  const prevPeersLen = useRef(0)
+  const wbApiRef = useRef(null)
 
   const { pcts, containerRef, onDividerMouseDown } = useVerticalResize([45, 55])
   const { runCode, isRunning } = useCodeRunner()
@@ -158,6 +170,37 @@ export default function Room() {
     return () => sharedMap.unobserve(onMapChange)
   }, [sharedMap])
 
+  // Trigger countdown when 2nd person joins
+  useEffect(() => {
+    const prev = prevPeersLen.current
+    prevPeersLen.current = peers.length
+    // prev > 0 ensures we don't fire on first render
+    if (prev > 0 && prev < 2 && peers.length >= 2) {
+      if (!sharedMap.get('interviewStarted')) {
+        sharedMap.set('interviewStarted', Date.now())
+      }
+    }
+  }, [peers, sharedMap])
+
+  // Observe countdown trigger from sharedMap (synced across all clients)
+  useEffect(() => {
+    function onMapChange(event) {
+      if (!event.changes.keys.has('interviewStarted')) return
+      setShowCountdown(true)
+    }
+    sharedMap.observe(onMapChange)
+    return () => sharedMap.unobserve(onMapChange)
+  }, [sharedMap])
+
+  // Show tips modal once per room per browser session
+  useEffect(() => {
+    const key = `mockpad-tips-${roomId}`
+    if (!sessionStorage.getItem(key)) {
+      const t = setTimeout(() => setShowTips(true), 800)
+      return () => clearTimeout(t)
+    }
+  }, [roomId])
+
   function showToast(msg) {
     clearTimeout(toastTimer.current)
     setToast({ msg, key: Date.now() })
@@ -211,6 +254,21 @@ export default function Room() {
 
   function handleCopyLink() {
     navigator.clipboard.writeText(window.location.href)
+  }
+
+  function handleDismissTips() {
+    sessionStorage.setItem(`mockpad-tips-${roomId}`, '1')
+    setShowTips(false)
+  }
+
+  function handleInsertCode(code) {
+    if (!yText) return
+    yText.doc.transact(() => {
+      yText.delete(0, yText.length)
+      yText.insert(0, code)
+    })
+    setActivePanel('code')
+    setShowResources(false)
   }
 
   return (
@@ -272,6 +330,12 @@ export default function Room() {
 
         <div style={styles.spacer} />
 
+        <button onClick={() => setShowResources(v => !v)} style={styles.iconBtn}>
+          Resources
+        </button>
+        <button onClick={() => setShowSummary(true)} style={styles.iconBtn}>
+          Summary
+        </button>
         <button onClick={handleCopyLink} style={styles.iconBtn} title="Copy room link">
           Copy link
         </button>
@@ -293,7 +357,19 @@ export default function Room() {
 
         <Panel defaultSize={60} minSize={25}>
           <div style={styles.fill}>
-            <Editor language={language} onMount={handleMount} readOnly={myRole === 'viewer'} />
+            {/* Panel tab bar */}
+            <div style={styles.panelTabs}>
+              <button onClick={() => setActivePanel('code')} style={styles.panelTab(activePanel === 'code')}>Code</button>
+              <button onClick={() => setActivePanel('whiteboard')} style={styles.panelTab(activePanel === 'whiteboard')}>Whiteboard</button>
+            </div>
+            {/* Editor — keep mounted so Monaco doesn't lose state */}
+            <div style={{ ...styles.tabContent, display: activePanel === 'code' ? 'flex' : 'none' }}>
+              <Editor language={language} onMount={handleMount} readOnly={myRole === 'viewer'} />
+            </div>
+            {/* Whiteboard */}
+            <div style={{ ...styles.tabContent, display: activePanel === 'whiteboard' ? 'flex' : 'none' }}>
+              <Whiteboard doc={doc} awareness={awareness} userId={MY_ID} onApi={(api) => { wbApiRef.current = api }} />
+            </div>
           </div>
         </Panel>
 
@@ -323,6 +399,37 @@ export default function Room() {
         <div key={toast.key} className="toast" style={styles.toast}>
           📋 {toast.msg}
         </div>
+      )}
+
+      <ResourceDrawer
+        open={showResources}
+        onClose={() => setShowResources(false)}
+        interviewType={interviewType}
+        onInsertCode={handleInsertCode}
+      />
+
+      {showCountdown && (
+        <CountdownOverlay onDone={() => setShowCountdown(false)} />
+      )}
+
+      {showTips && (
+        <TipsModal
+          interviewType={interviewType}
+          onDismiss={handleDismissTips}
+        />
+      )}
+
+      {showSummary && (
+        <SummaryModal
+          onClose={() => setShowSummary(false)}
+          roomId={roomId}
+          interviewType={interviewType}
+          language={language}
+          sharedMap={sharedMap}
+          editor={editor}
+          peers={peers}
+          wbApi={wbApiRef.current}
+        />
       )}
 
     </div>
@@ -478,5 +585,28 @@ const styles = {
     boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
     zIndex: 9999,
     pointerEvents: 'none',
+  },
+  panelTabs: {
+    display: 'flex',
+    background: '#252525',
+    borderBottom: '1px solid #3a3a3a',
+    flexShrink: 0,
+  },
+  panelTab: (active) => ({
+    padding: '6px 16px',
+    background: active ? '#1e1e1e' : 'none',
+    border: 'none',
+    borderBottom: active ? '2px solid #569cd6' : '2px solid transparent',
+    color: active ? '#d4d4d4' : '#666',
+    fontSize: '12px',
+    cursor: 'pointer',
+    fontFamily: 'monospace',
+    transition: 'color 0.15s',
+    marginBottom: '-1px',
+  }),
+  tabContent: {
+    flex: 1,
+    flexDirection: 'column',
+    overflow: 'hidden',
   },
 }

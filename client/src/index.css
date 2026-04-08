@@ -76,3 +76,22 @@ body {
 .ring-expired {
   animation: ringExpired 0.45s ease-in-out 4;
 }
+
+/* Resource drawer */
+@keyframes drawerIn {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+/* Whiteboard canvas cursor */
+.wb-eraser { cursor: cell; }
+
+/* ── Countdown overlay ───────────────────────────────── */
+@keyframes cdFadeIn  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cdFadeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes cdNum     { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cdMsg     { from { opacity: 0; } to { opacity: 1; } }
+.shutter-enter { animation: cdFadeIn  0.2s ease both; }
+.shutter-exit  { animation: cdFadeOut 0.25s ease both; }
+.num-pop       { animation: cdNum     0.15s ease both; }
+.msg-reveal    { animation: cdMsg     0.3s  ease both; }
