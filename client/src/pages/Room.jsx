@@ -72,6 +72,7 @@ export default function Room() {
   const [showFeatures, setShowFeatures] = useState(false)
   const prevPeersLen = useRef(0)
   const wbApiRef = useRef(null)
+  const runBtnRef = useRef(null)
 
   const { pcts, containerRef, onDividerMouseDown } = useVerticalResize([45, 55])
   const { runCode, isRunning } = useCodeRunner()
@@ -267,7 +268,7 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
       sharedMap.set('pasteEvent', { name: MY_NAME, lines, uid: MY_ID, t: Date.now() })
     })
     editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-      handleRun()
+      runBtnRef.current?.click()
     })
   }
 
@@ -419,6 +420,7 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
           </button>
         )}
         <button
+          ref={runBtnRef}
           onClick={handleRun}
           disabled={isRunning}
           className={isRunning ? 'run-pulse' : ''}
