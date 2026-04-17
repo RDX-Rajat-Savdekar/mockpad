@@ -98,11 +98,17 @@ export default function Room() {
       })
       setPeers(list)
     }
-    awareness.on('change', update)
+    // Re-read after 600ms on awareness change to catch role assignments
+    // that happen async after the joining user syncs with Yjs
+    function updateWithDelay() {
+      update()
+      setTimeout(update, 600)
+    }
+    awareness.on('change', updateWithDelay)
     sharedMap.observe(update)
     update()
     return () => {
-      awareness.off('change', update)
+      awareness.off('change', updateWithDelay)
       sharedMap.unobserve(update)
     }
   }, [awareness, sharedMap])
@@ -370,7 +376,7 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
         <button onClick={() => setShowSummary(true)} style={styles.iconBtn}>
           Summary
         </button>
-        <button onClick={handleCopyLink} style={styles.iconBtn} title="Copy room link">
+        <button onClick={handleCopyLink} style={styles.copyLinkBtn} title="Copy room link">
           Copy link
         </button>
         <button onClick={handleReset} style={styles.iconBtn} title="Reset editor">
@@ -575,6 +581,11 @@ const styles = {
     background: 'none', border: '1px solid #444', borderRadius: '4px',
     color: '#999', fontSize: '12px', padding: '4px 10px', cursor: 'pointer',
     transition: 'border-color 0.15s, color 0.15s',
+  },
+  copyLinkBtn: {
+    background: '#1a3a5c', border: '1px solid #4a8abf', borderRadius: '4px',
+    color: '#7ab3f5', fontSize: '12px', padding: '4px 10px', cursor: 'pointer',
+    fontWeight: 'bold', transition: 'background 0.15s',
   },
   runButton: (running) => ({
     background: running ? '#0a5a0a' : '#0e7a0e',
