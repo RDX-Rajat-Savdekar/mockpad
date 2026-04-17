@@ -306,9 +306,9 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
     <div style={styles.container}>
 
       {/* Reconnection banner */}
-      {connStatus !== 'connected' && (
+      {connStatus === 'disconnected' && (
         <div style={styles.banner(connStatus)} className="conn-banner">
-          {connStatus === 'connecting' ? '⏳ Reconnecting…' : '⚠ Disconnected — edits will sync when reconnected'}
+          ⚠ Disconnected — edits will sync when reconnected
         </div>
       )}
 

@@ -4,21 +4,38 @@ const { setupWSConnection, setPersistence } = require('y-websocket/bin/utils')
 const { LeveldbPersistence } = require('y-leveldb')
 const Y = require('yjs')
 
-const ROOM_TTL = 2 * 60 * 60 * 1000 // 2 hours
+const INACTIVITY_TTL = 30 * 60 * 1000  // 30 min after last user leaves
+const HARD_TTL       = 2 * 60 * 60 * 1000 // 2 hour hard deadline from creation
 
 const ldb = new LeveldbPersistence('./storage')
 
-const roomTimers = new Map() // roomName -> timeout handle
+const roomConnections = new Map() // roomName -> Set of ws
+const inactivityTimers = new Map() // roomName -> timeout handle
+const hardTimers = new Map()       // roomName -> timeout handle
 
-function startRoomTimer(roomName) {
-  if (roomTimers.has(roomName)) return // already scheduled
-  const timer = setTimeout(async () => {
-    await ldb.clearDocument(roomName)
-    roomTimers.delete(roomName)
-    console.log(`[cleanup] Room expired and deleted: ${roomName}`)
-  }, ROOM_TTL)
-  roomTimers.set(roomName, timer)
-  console.log(`[room] Created: ${roomName} — expires in 2 hours`)
+async function deleteRoom(roomName, reason) {
+  clearTimeout(inactivityTimers.get(roomName))
+  clearTimeout(hardTimers.get(roomName))
+  inactivityTimers.delete(roomName)
+  hardTimers.delete(roomName)
+  roomConnections.delete(roomName)
+  await ldb.clearDocument(roomName)
+  console.log(`[cleanup] Room deleted (${reason}): ${roomName}`)
+}
+
+function startHardTimer(roomName) {
+  if (hardTimers.has(roomName)) return
+  const timer = setTimeout(() => deleteRoom(roomName, 'hard 2h deadline'), HARD_TTL)
+  hardTimers.set(roomName, timer)
+}
+
+function onRoomEmpty(roomName) {
+  clearTimeout(inactivityTimers.get(roomName))
+  const timer = setTimeout(() => {
+    const conns = roomConnections.get(roomName)
+    if (!conns || conns.size === 0) deleteRoom(roomName, '30min inactivity')
+  }, INACTIVITY_TTL)
+  inactivityTimers.set(roomName, timer)
 }
 
 setPersistence({
@@ -27,7 +44,7 @@ setPersistence({
     const persisted = await ldb.getYDoc(docName)
     Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(persisted))
     ydoc.on('update', (update) => ldb.storeUpdate(docName, update))
-    startRoomTimer(docName)
+    startHardTimer(docName)
   },
   writeState: () => {},
 })
@@ -36,7 +53,21 @@ const server = http.createServer()
 const wss = new WebSocketServer({ server })
 
 wss.on('connection', (ws, req) => {
+  const roomName = req.url?.slice(1).split('?')[0] ?? 'default'
+
+  if (!roomConnections.has(roomName)) roomConnections.set(roomName, new Set())
+  roomConnections.get(roomName).add(ws)
+  clearTimeout(inactivityTimers.get(roomName)) // cancel inactivity timer if someone joins
+
   setupWSConnection(ws, req)
+
+  ws.on('close', () => {
+    const conns = roomConnections.get(roomName)
+    if (conns) {
+      conns.delete(ws)
+      if (conns.size === 0) onRoomEmpty(roomName)
+    }
+  })
 })
 
 const PORT = process.env.PORT || 1234
