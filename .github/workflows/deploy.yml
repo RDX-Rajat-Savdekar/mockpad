@@ -17,9 +17,10 @@ jobs:
           username: root
           key: ${{ secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          command_timeout: 5m
           script: |
             cd /root/mockpad
             git pull origin main
             cd server
-            npm install
+            npm ci --prefer-offline
             pm2 restart mockpad
