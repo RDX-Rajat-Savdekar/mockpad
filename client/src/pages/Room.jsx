@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
 import Editor from '../components/Editor'
 import Whiteboard from '../components/Whiteboard'
@@ -51,6 +51,7 @@ const MY_ID = getUserId()
 export default function Room() {
   const { roomId } = useParams()
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const MY_NAME = getUsername()
   const MY_COLOR = getUserColor()
 
@@ -98,11 +99,15 @@ export default function Room() {
       })
       setPeers(list)
     }
-    // Re-read after 600ms on awareness change to catch role assignments
-    // that happen async after the joining user syncs with Yjs
+    // Remote role assignments arrive after awareness, re-read at multiple points
+    const delayTimers = []
     function updateWithDelay() {
       update()
-      setTimeout(update, 600)
+      delayTimers.forEach(clearTimeout)
+      delayTimers.length = 0
+      delayTimers.push(setTimeout(update, 500))
+      delayTimers.push(setTimeout(update, 1500))
+      delayTimers.push(setTimeout(update, 3000))
     }
     awareness.on('change', updateWithDelay)
     sharedMap.observe(update)
@@ -110,6 +115,7 @@ export default function Room() {
     return () => {
       awareness.off('change', updateWithDelay)
       sharedMap.unobserve(update)
+      delayTimers.forEach(clearTimeout)
     }
   }, [awareness, sharedMap])
 
@@ -229,6 +235,16 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
     return () => sharedMap.unobserve(onMapChange)
   }, [sharedMap])
 
+  // Redirect everyone when room is ended
+  useEffect(() => {
+    function onMapChange(event) {
+      if (!event.changes.keys.has('roomEnded')) return
+      if (sharedMap.get('roomEnded')) navigate('/')
+    }
+    sharedMap.observe(onMapChange)
+    return () => sharedMap.unobserve(onMapChange)
+  }, [sharedMap, navigate])
+
   // Show tips modal once per room per browser session
   useEffect(() => {
     const key = `mockpad-tips-${roomId}`
@@ -244,12 +260,27 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
     toastTimer.current = setTimeout(() => setToast(null), 3100)
   }
 
-  function handleMount(editorInstance) {
+  function handleMount(editorInstance, monaco) {
     setEditor(editorInstance)
     editorInstance.onDidPaste((e) => {
       const lines = e.range.endLineNumber - e.range.startLineNumber + 1
       sharedMap.set('pasteEvent', { name: MY_NAME, lines, uid: MY_ID, t: Date.now() })
     })
+    editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      handleRun()
+    })
+  }
+
+  async function handleEndRoom() {
+    if (!window.confirm('End this room? This will delete all data and disconnect everyone.')) return
+    sharedMap.set('roomEnded', true)
+    const WS_SERVER = import.meta.env.VITE_WS_SERVER ?? 'ws://localhost:1234'
+    const httpBase = WS_SERVER.replace('wss://', 'https://').replace('ws://', 'http://')
+    await fetch(`${httpBase}/end-room`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomId }),
+    }).catch(() => {})
   }
 
   function handleLanguageChange(lang) {
@@ -382,6 +413,11 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
         <button onClick={handleReset} style={styles.iconBtn} title="Reset editor">
           Reset
         </button>
+        {myRole === 'interviewer' && (
+          <button onClick={handleEndRoom} style={styles.endRoomBtn} title="End room and delete all data">
+            End Room
+          </button>
+        )}
         <button
           onClick={handleRun}
           disabled={isRunning}
@@ -585,6 +621,11 @@ const styles = {
   copyLinkBtn: {
     background: '#1a3a5c', border: '1px solid #4a8abf', borderRadius: '4px',
     color: '#7ab3f5', fontSize: '12px', padding: '4px 10px', cursor: 'pointer',
+    fontWeight: 'bold', transition: 'background 0.15s',
+  },
+  endRoomBtn: {
+    background: '#3a1a1a', border: '1px solid #8b2020', borderRadius: '4px',
+    color: '#ff6b6b', fontSize: '12px', padding: '4px 10px', cursor: 'pointer',
     fontWeight: 'bold', transition: 'background 0.15s',
   },
   runButton: (running) => ({
