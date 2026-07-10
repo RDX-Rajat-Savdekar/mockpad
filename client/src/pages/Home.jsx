@@ -33,15 +33,22 @@ export default function Home() {
     // Accept full URLs or bare room IDs
     try {
       const url = new URL(id)
-      const parts = url.pathname.split('/')
-      id = parts[parts.length - 1]
+      // Prefer /room/<id> even with trailing slashes or extra path segments
+      const match = url.pathname.match(/\/room\/([^/]+)/)
+      if (match) {
+        id = decodeURIComponent(match[1])
+      } else {
+        const parts = url.pathname.split('/').filter(Boolean)
+        id = parts[parts.length - 1] ?? ''
+      }
       // Preserve lang/type from the pasted link
       const lang = url.searchParams.get('lang')
       const type = url.searchParams.get('type')
       const qs = [lang && `lang=${lang}`, type && `type=${type}`].filter(Boolean).join('&')
       if (qs) extraParams = `?${qs}`
     } catch {
-      // not a URL — treat as a bare room ID
+      // not a URL — treat as a bare room ID (strip trailing slash)
+      id = id.replace(/\/+$/, '')
     }
     if (!id) return
     if (name.trim()) setUsername(name.trim())

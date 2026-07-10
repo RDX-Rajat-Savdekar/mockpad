@@ -62,7 +62,6 @@ export default function Room() {
   const [editor, setEditor] = useState(null)
   const [activePanel, setActivePanel] = useState('code')
   const [showResources, setShowResources] = useState(false)
-  const [connStatus, setConnStatus] = useState('connected')
   const [peers, setPeers] = useState([])
   const [toast, setToast] = useState(null) // { msg, key }
   const toastTimer = useRef(null)
@@ -70,17 +69,21 @@ export default function Room() {
   const [showTips, setShowTips] = useState(false)
   const [showSummary, setShowSummary] = useState(false)
   const [showFeatures, setShowFeatures] = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
   const prevPeersLen = useRef(0)
   const wbApiRef = useRef(null)
   const runBtnRef = useRef(null)
 
   const { pcts, containerRef, onDividerMouseDown } = useVerticalResize([45, 55])
   const { runCode, isRunning } = useCodeRunner()
-  const { doc, provider, awareness, yText } = useYjs(roomId, editor, MY_NAME, MY_COLOR, MY_ID)
-  const sharedMap = doc.getMap('shared')
+  const { doc, awareness, yText, synced, status: connStatus, wsServer } = useYjs(
+    roomId, editor, MY_NAME, MY_COLOR, MY_ID
+  )
+  const sharedMap = doc ? doc.getMap('shared') : null
 
   // Presence
   useEffect(() => {
+    if (!awareness || !sharedMap) return undefined
     function update() {
       const roles = sharedMap.get('roles') ?? {}
       const seen = new Set()
@@ -100,7 +103,6 @@ export default function Room() {
       })
       setPeers(list)
     }
-    // Remote role assignments arrive after awareness, re-read at multiple points
     const delayTimers = []
     function updateWithDelay() {
       update()
@@ -120,15 +122,9 @@ export default function Room() {
     }
   }, [awareness, sharedMap])
 
-  // Reconnection status
-  useEffect(() => {
-    function onStatus({ status }) { setConnStatus(status) }
-    provider.on('status', onStatus)
-    return () => provider.off('status', onStatus)
-  }, [provider])
-
   // Shared state changes
   useEffect(() => {
+    if (!sharedMap) return undefined
     function onMapChange() {
       const lang = sharedMap.get('language')
       const out = sharedMap.get('output')
@@ -140,39 +136,39 @@ export default function Room() {
       if (roles[MY_ID]) setMyRole(roles[MY_ID])
     }
     sharedMap.observe(onMapChange)
+    onMapChange()
     return () => sharedMap.unobserve(onMapChange)
   }, [sharedMap])
 
   // Role assignment + defaults after Yjs sync
   useEffect(() => {
-    function onSynced() {
-      const roles = sharedMap.get('roles') ?? {}
-      if (!roles[MY_ID]) {
-        const taken = Object.values(roles)
-        let role
-        if (!taken.includes('interviewer')) role = 'interviewer'
-        else if (!taken.includes('interviewee')) role = 'interviewee'
-        else role = 'viewer'
-        sharedMap.set('roles', { ...roles, [MY_ID]: role })
-        setMyRole(role)
-      } else {
-        setMyRole(roles[MY_ID])
-      }
-      if (!sharedMap.get('language')) {
-        const lang = searchParams.get('lang') ?? 'python'
-        sharedMap.set('language', lang)
-        setLanguage(lang)
-      }
-      if (!sharedMap.get('interviewType')) {
-        const type = searchParams.get('type') ?? 'leetcode'
-        sharedMap.set('interviewType', type)
-        setInterviewType(type)
-      }
-      // Seed demo room with sample content on first visit
-      if (searchParams.get('demo') === '1' && !sharedMap.get('demoSeeded')) {
-        sharedMap.set('demoSeeded', true)
-        sharedMap.set('timerDuration', 45 * 60 * 1000)
-        const demoCode = `# Two Sum — find indices of two numbers that add to target
+    if (!synced || !sharedMap || !yText) return
+    const roles = sharedMap.get('roles') ?? {}
+    if (!roles[MY_ID]) {
+      const taken = Object.values(roles)
+      let role
+      if (!taken.includes('interviewer')) role = 'interviewer'
+      else if (!taken.includes('interviewee')) role = 'interviewee'
+      else role = 'viewer'
+      sharedMap.set('roles', { ...roles, [MY_ID]: role })
+      setMyRole(role)
+    } else {
+      setMyRole(roles[MY_ID])
+    }
+    if (!sharedMap.get('language')) {
+      const lang = searchParams.get('lang') ?? 'python'
+      sharedMap.set('language', lang)
+      setLanguage(lang)
+    }
+    if (!sharedMap.get('interviewType')) {
+      const type = searchParams.get('type') ?? 'leetcode'
+      sharedMap.set('interviewType', type)
+      setInterviewType(type)
+    }
+    if (searchParams.get('demo') === '1' && !sharedMap.get('demoSeeded')) {
+      sharedMap.set('demoSeeded', true)
+      sharedMap.set('timerDuration', 45 * 60 * 1000)
+      const demoCode = `# Two Sum — find indices of two numbers that add to target
 # Pattern: Hash map for O(n) lookup
 
 def two_sum(nums, target):
@@ -187,23 +183,21 @@ def two_sum(nums, target):
 # Test
 print(two_sum([2, 7, 11, 15], 9))   # [0, 1]
 print(two_sum([3, 2, 4], 6))        # [1, 2]`
-        yText.doc.transact(() => {
-          yText.delete(0, yText.length)
-          yText.insert(0, demoCode)
-        })
-        sharedMap.set(`sharedNotes-${MY_ID}`, {
-          name: MY_NAME,
-          role: 'interviewer',
-          text: `Clarify:\n- Return indices, not values\n- Each input has exactly one solution\n- Can't use same element twice\n\nBrute force: O(n²) — nested loops\nOptimal: O(n) — hash map\n\nFollow-ups:\n- What if sorted? → Two pointers\n- What if multiple solutions?`,
-        })
-      }
+      yText.doc.transact(() => {
+        yText.delete(0, yText.length)
+        yText.insert(0, demoCode)
+      })
+      sharedMap.set(`sharedNotes-${MY_ID}`, {
+        name: MY_NAME,
+        role: 'interviewer',
+        text: `Clarify:\n- Return indices, not values\n- Each input has exactly one solution\n- Can't use same element twice\n\nBrute force: O(n²) — nested loops\nOptimal: O(n) — hash map\n\nFollow-ups:\n- What if sorted? → Two pointers\n- What if multiple solutions?`,
+      })
     }
-    provider.on('synced', onSynced)
-    return () => provider.off('synced', onSynced)
-  }, [sharedMap, provider])
+  }, [synced, sharedMap, yText, searchParams])
 
   // Paste event toast
   useEffect(() => {
+    if (!sharedMap) return undefined
     function onMapChange(event) {
       if (!event.changes.keys.has('pasteEvent')) return
       const ev = sharedMap.get('pasteEvent')
@@ -216,9 +210,9 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
 
   // Trigger countdown when 2nd person joins
   useEffect(() => {
+    if (!sharedMap) return
     const prev = prevPeersLen.current
     prevPeersLen.current = peers.length
-    // prev > 0 ensures we don't fire on first render
     if (prev > 0 && prev < 2 && peers.length >= 2) {
       if (!sharedMap.get('interviewStarted')) {
         sharedMap.set('interviewStarted', Date.now())
@@ -228,6 +222,7 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
 
   // Observe countdown trigger from sharedMap (synced across all clients)
   useEffect(() => {
+    if (!sharedMap) return undefined
     function onMapChange(event) {
       if (!event.changes.keys.has('interviewStarted')) return
       setShowCountdown(true)
@@ -238,6 +233,7 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
 
   // Redirect everyone when room is ended
   useEffect(() => {
+    if (!sharedMap) return undefined
     function onMapChange(event) {
       if (!event.changes.keys.has('roomEnded')) return
       if (sharedMap.get('roomEnded')) navigate('/')
@@ -248,12 +244,13 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
 
   // Show tips modal once per room per browser session
   useEffect(() => {
+    if (!synced) return undefined
     const key = `mockpad-tips-${roomId}`
     if (!sessionStorage.getItem(key)) {
       const t = setTimeout(() => setShowTips(true), 800)
       return () => clearTimeout(t)
     }
-  }, [roomId])
+  }, [roomId, synced])
 
   function showToast(msg) {
     clearTimeout(toastTimer.current)
@@ -265,7 +262,7 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
     setEditor(editorInstance)
     editorInstance.onDidPaste((e) => {
       const lines = e.range.endLineNumber - e.range.startLineNumber + 1
-      sharedMap.set('pasteEvent', { name: MY_NAME, lines, uid: MY_ID, t: Date.now() })
+      sharedMap?.set('pasteEvent', { name: MY_NAME, lines, uid: MY_ID, t: Date.now() })
     })
     editorInstance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
       runBtnRef.current?.click()
@@ -274,9 +271,8 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
 
   async function handleEndRoom() {
     if (!window.confirm('End this room? This will delete all data and disconnect everyone.')) return
-    sharedMap.set('roomEnded', true)
-    const WS_SERVER = import.meta.env.VITE_WS_SERVER ?? 'ws://localhost:1234'
-    const httpBase = WS_SERVER.replace('wss://', 'https://').replace('ws://', 'http://')
+    sharedMap?.set('roomEnded', true)
+    const httpBase = wsServer.replace('wss://', 'https://').replace('ws://', 'http://')
     await fetch(`${httpBase}/end-room`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -286,43 +282,50 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
 
   function handleLanguageChange(lang) {
     setLanguage(lang)
-    sharedMap.set('language', lang)
+    sharedMap?.set('language', lang)
   }
 
   function handleTypeChange(type) {
     setInterviewType(type)
-    sharedMap.set('interviewType', type)
+    sharedMap?.set('interviewType', type)
   }
 
   function handleMyRoleChange(newRole) {
-    const roles = sharedMap.get('roles') ?? {}
-    sharedMap.set('roles', { ...roles, [MY_ID]: newRole })
+    const roles = sharedMap?.get('roles') ?? {}
+    sharedMap?.set('roles', { ...roles, [MY_ID]: newRole })
   }
 
   function handleRoleSwap() {
-    const roles = sharedMap.get('roles') ?? {}
+    const roles = sharedMap?.get('roles') ?? {}
     const swapped = Object.fromEntries(
       Object.entries(roles).map(([id, role]) => [
         id,
         role === 'interviewer' ? 'interviewee' : role === 'interviewee' ? 'interviewer' : 'viewer',
       ])
     )
-    sharedMap.set('roles', swapped)
+    sharedMap?.set('roles', swapped)
   }
 
   async function handleRun() {
     const code = editor?.getValue() ?? ''
-    sharedMap.set('output', 'Running...')
+    sharedMap?.set('output', 'Running...')
     const result = await runCode(code, language)
-    sharedMap.set('output', result)
+    sharedMap?.set('output', result)
   }
 
   function handleReset() {
+    if (!yText) return
     yText.doc.transact(() => yText.delete(0, yText.length))
   }
 
   function handleCopyLink() {
-    navigator.clipboard.writeText(window.location.href)
+    const lang = searchParams.get('lang')
+    const type = searchParams.get('type')
+    const qs = [lang && `lang=${lang}`, type && `type=${type}`].filter(Boolean).join('&')
+    const url = `${window.location.origin}/room/${roomId}${qs ? `?${qs}` : ''}`
+    navigator.clipboard.writeText(url)
+    setLinkCopied(true)
+    setTimeout(() => setLinkCopied(false), 2000)
   }
 
   function handleDismissTips() {
@@ -340,6 +343,27 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
     setShowResources(false)
   }
 
+  // Wait until synced — otherwise each browser looks like its own empty room
+  if (!synced || !doc || !sharedMap) {
+    const stuck = connStatus === 'disconnected'
+    return (
+      <div style={styles.connectingPage}>
+        <div style={styles.connectingCard}>
+          <div style={styles.connectingTitle}>MockPad</div>
+          <div style={styles.connectingStatus}>
+            {stuck ? 'Cannot reach the sync server' : 'Joining room…'}
+          </div>
+          <div style={styles.connectingRoomId}>{roomId}</div>
+          <div style={styles.connectingHint}>
+            {stuck
+              ? 'The WebSocket server is unreachable. Until it is back, you are not in a shared room — refresh after it is restarted.'
+              : 'Loading the shared document so you join the same room as everyone else.'}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={styles.container}>
 
@@ -347,6 +371,11 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
       {connStatus === 'disconnected' && (
         <div style={styles.banner(connStatus)} className="conn-banner">
           ⚠ Disconnected — edits will sync when reconnected
+        </div>
+      )}
+      {connStatus === 'connecting' && (
+        <div style={styles.banner(connStatus)} className="conn-banner">
+          Connecting to room…
         </div>
       )}
 
@@ -409,7 +438,7 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
           Summary
         </button>
         <button onClick={handleCopyLink} style={styles.copyLinkBtn} title="Copy room link">
-          Copy link
+          {linkCopied ? 'Copied!' : 'Copy link'}
         </button>
         <button onClick={handleReset} style={styles.iconBtn} title="Reset editor">
           Reset
@@ -704,4 +733,31 @@ const styles = {
     flexDirection: 'column',
     overflow: 'hidden',
   },
+  connectingPage: {
+    height: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: '#1e1e1e',
+    fontFamily: 'monospace',
+  },
+  connectingCard: {
+    background: '#2d2d2d',
+    border: '1px solid #444',
+    borderRadius: '12px',
+    padding: '36px 40px',
+    maxWidth: '420px',
+    textAlign: 'center',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '12px',
+  },
+  connectingTitle: { color: '#fff', fontSize: '28px', fontWeight: 'bold', margin: 0 },
+  connectingStatus: { color: '#d4d4d4', fontSize: '15px' },
+  connectingRoomId: {
+    color: '#7ab3f5', fontSize: '12px', wordBreak: 'break-all',
+    background: '#1e1e1e', border: '1px solid #444', borderRadius: '6px', padding: '8px 10px',
+  },
+  connectingHint: { color: '#888', fontSize: '13px', lineHeight: 1.5 },
 }
+

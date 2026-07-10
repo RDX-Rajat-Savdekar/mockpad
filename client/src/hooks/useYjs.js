@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import { MonacoBinding } from 'y-monaco'
@@ -35,45 +35,78 @@ function injectCursorStyles(awareness, doc) {
 }
 
 export function useYjs(roomId, editor, username, color, userId) {
-  const docRef = useRef(null)
-  if (!docRef.current) {
-    docRef.current = new Y.Doc()
-  }
+  const [conn, setConn] = useState(null) // { doc, provider }
+  const [synced, setSynced] = useState(false)
+  const [status, setStatus] = useState('connecting')
+  const editorRef = useRef(editor)
+  editorRef.current = editor
 
-  const providerRef = useRef(null)
-  if (!providerRef.current) {
-    providerRef.current = new WebsocketProvider(WS_SERVER, roomId, docRef.current)
-  }
-
-  // Set local user info on awareness whenever name/color changes
+  // Create / recreate the Yjs connection whenever the room changes
   useEffect(() => {
-    providerRef.current.awareness.setLocalStateField('user', { name: username, color, userId })
-  }, [username, color, userId])
+    if (!roomId) return undefined
 
+    const doc = new Y.Doc()
+    const provider = new WebsocketProvider(WS_SERVER, roomId, doc)
+    setConn({ doc, provider })
+    setSynced(false)
+    setStatus('connecting')
+
+    const onStatus = ({ status: next }) => setStatus(next)
+    const onSync = (isSynced) => setSynced(!!isSynced)
+
+    provider.on('status', onStatus)
+    provider.on('sync', onSync)
+    // If the provider already synced before we attached (fast reconnect), catch it
+    if (provider.synced) setSynced(true)
+
+    // If the handshake hangs (common when the WS proxy/server is wedged),
+    // surface a disconnected state so the UI doesn't look like a private room.
+    const stuckTimer = setTimeout(() => {
+      if (!provider.synced) setStatus('disconnected')
+    }, 8000)
+
+    return () => {
+      clearTimeout(stuckTimer)
+      provider.off('status', onStatus)
+      provider.off('sync', onSync)
+      provider.destroy()
+      doc.destroy()
+      setConn(null)
+      setSynced(false)
+      setStatus('connecting')
+    }
+  }, [roomId])
+
+  // Keep awareness user info up to date
   useEffect(() => {
-    if (!editor) return
-    const doc = docRef.current
-    const provider = providerRef.current
+    if (!conn) return
+    conn.provider.awareness.setLocalStateField('user', { name: username, color, userId })
+  }, [conn, username, color, userId])
+
+  // Bind Monaco once both the editor and the room connection exist
+  useEffect(() => {
+    if (!conn || !editor) return undefined
+    const { doc, provider } = conn
     const yText = doc.getText('monaco')
     const model = editor.getModel()
-    const binding = new MonacoBinding(yText, model, new Set([editor]), provider.awareness)
+    if (!model) return undefined
 
-    // Start injecting CSS for remote cursors
+    const binding = new MonacoBinding(yText, model, new Set([editor]), provider.awareness)
     const cleanup = injectCursorStyles(provider.awareness, doc)
 
     return () => {
       binding.destroy()
       cleanup()
     }
-  }, [editor])
-
-  const doc = docRef.current
-  const provider = providerRef.current
+  }, [conn, editor])
 
   return {
-    doc,
-    provider,
-    awareness: provider.awareness,
-    yText: doc.getText('monaco'),
+    doc: conn?.doc ?? null,
+    provider: conn?.provider ?? null,
+    awareness: conn?.provider.awareness ?? null,
+    yText: conn ? conn.doc.getText('monaco') : null,
+    synced,
+    status,
+    wsServer: WS_SERVER,
   }
 }
