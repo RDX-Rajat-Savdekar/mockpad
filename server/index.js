@@ -43,10 +43,15 @@ setPersistence({
   bindState: async (docName, ydoc) => {
     const persisted = await ldb.getYDoc(docName)
     Y.applyUpdate(ydoc, Y.encodeStateAsUpdate(persisted))
-    ydoc.on('update', (update) => ldb.storeUpdate(docName, update))
+    ydoc.on('update', (update) => {
+      ldb.storeUpdate(docName, update).catch((err) => {
+        console.error(`[persist] storeUpdate failed for ${docName}:`, err.message)
+      })
+    })
     startHardTimer(docName)
   },
-  writeState: () => {},
+  // y-websocket always does writeState(...).then(...) — must return a Promise
+  writeState: async () => {},
 })
 
 const server = http.createServer((req, res) => {
