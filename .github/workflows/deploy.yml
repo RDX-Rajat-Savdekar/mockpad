@@ -23,4 +23,7 @@ jobs:
             git pull origin main
             cd server
             npm ci --prefer-offline
-            pm2 restart mockpad
+            # Use ecosystem so memory restart + heap limits stick across deploys
+            pm2 delete mockpad || true
+            pm2 start ecosystem.config.cjs
+            pm2 save

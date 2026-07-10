@@ -56,19 +56,28 @@ export function useYjs(roomId, editor, username, color, userId) {
 
     provider.on('status', onStatus)
     provider.on('sync', onSync)
-    // If the provider already synced before we attached (fast reconnect), catch it
     if (provider.synced) setSynced(true)
 
-    // If the handshake hangs (common when the WS proxy/server is wedged),
-    // surface a disconnected state so the UI doesn't look like a private room.
     const stuckTimer = setTimeout(() => {
       if (!provider.synced) setStatus('disconnected')
     }, 8000)
 
+    // Stop reconnect storms when the tab is closing / backgrounded for good
+    const hardDisconnect = () => {
+      provider.shouldConnect = false
+      try { provider.disconnect() } catch { /* ignore */ }
+    }
+    window.addEventListener('pagehide', hardDisconnect)
+    window.addEventListener('beforeunload', hardDisconnect)
+
     return () => {
       clearTimeout(stuckTimer)
+      window.removeEventListener('pagehide', hardDisconnect)
+      window.removeEventListener('beforeunload', hardDisconnect)
       provider.off('status', onStatus)
       provider.off('sync', onSync)
+      provider.shouldConnect = false
+      try { provider.disconnect() } catch { /* ignore */ }
       provider.destroy()
       doc.destroy()
       setConn(null)
