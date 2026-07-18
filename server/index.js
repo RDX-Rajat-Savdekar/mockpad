@@ -24,6 +24,7 @@ const inactivityTimers = new Map()
 const hardTimers = new Map()
 const compactTimers = new Map()
 const roomCreatedAt = new Map()
+const terminatedRooms = new Set()
 
 function totalConnections() {
   let n = 0
@@ -43,6 +44,9 @@ function scheduleCompact(docName) {
 }
 
 async function deleteRoom(roomName, reason) {
+  terminatedRooms.add(roomName)
+  setTimeout(() => terminatedRooms.delete(roomName), 15000)
+
   clearTimeout(inactivityTimers.get(roomName))
   clearTimeout(hardTimers.get(roomName))
   clearTimeout(compactTimers.get(roomName))
@@ -207,6 +211,11 @@ const wss = new WebSocketServer({
 
 wss.on('connection', (ws, req) => {
   const roomName = decodeURIComponent((req.url || '/').slice(1).split('?')[0] || 'default')
+
+  if (terminatedRooms.has(roomName)) {
+    ws.close(4000, 'room terminated')
+    return
+  }
 
   if (totalConnections() >= MAX_TOTAL_CONN) {
     ws.close(1013, 'server at capacity')

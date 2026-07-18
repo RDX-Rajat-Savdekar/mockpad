@@ -1,39 +1,35 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { generateRoomId, setUsername, getUsername } from '../utils/roomId'
-import FeaturesModal from '../components/FeaturesModal'
-
-const LANGUAGES = ['python', 'javascript', 'java', 'cpp']
-const INTERVIEW_TYPES = ['leetcode', 'system-design', 'behavioral', 'general']
 
 export default function Home() {
   const navigate = useNavigate()
   const [joinId, setJoinId] = useState('')
-  const [language, setLanguage] = useState('python')
-  const [interviewType, setInterviewType] = useState('leetcode')
   const [name, setName] = useState(getUsername())
-  const [showFeatures, setShowFeatures] = useState(false)
 
   function handleCreate() {
-    if (name.trim()) setUsername(name.trim())
+    const trimmedName = name.trim()
+    if (!trimmedName) {
+      alert('Please enter your name to continue.')
+      return
+    }
+    setUsername(trimmedName)
     const id = generateRoomId()
-    navigate(`/room/${id}?lang=${language}&type=${interviewType}`)
-  }
-
-  function handleDemo() {
-    if (name.trim()) setUsername(name.trim())
-    navigate(`/room/mockpad-demo?lang=python&type=leetcode&demo=1`)
+    navigate(`/room/${id}?lang=python&type=leetcode`)
   }
 
   function handleJoin(e) {
     e.preventDefault()
+    const trimmedName = name.trim()
+    if (!trimmedName) {
+      alert('Please enter your name to continue.')
+      return
+    }
     let id = joinId.trim()
     if (!id) return
     let extraParams = ''
-    // Accept full URLs or bare room IDs
     try {
       const url = new URL(id)
-      // Prefer /room/<id> even with trailing slashes or extra path segments
       const match = url.pathname.match(/\/room\/([^/]+)/)
       if (match) {
         id = decodeURIComponent(match[1])
@@ -41,86 +37,52 @@ export default function Home() {
         const parts = url.pathname.split('/').filter(Boolean)
         id = parts[parts.length - 1] ?? ''
       }
-      // Preserve lang/type from the pasted link
       const lang = url.searchParams.get('lang')
       const type = url.searchParams.get('type')
       const qs = [lang && `lang=${lang}`, type && `type=${type}`].filter(Boolean).join('&')
       if (qs) extraParams = `?${qs}`
     } catch {
-      // not a URL — treat as a bare room ID (strip trailing slash)
       id = id.replace(/\/+$/, '')
     }
     if (!id) return
-    if (name.trim()) setUsername(name.trim())
+    setUsername(trimmedName)
     navigate(`/room/${id}${extraParams}`)
   }
 
   return (
     <div style={styles.page}>
-      {showFeatures && (
-        <FeaturesModal
-          onClose={() => setShowFeatures(false)}
-          onDemo={() => { setShowFeatures(false); handleDemo() }}
-        />
-      )}
       <div style={styles.card}>
-        <h1 style={styles.title}>MockPad</h1>
-        <p style={styles.subtitle}>Free real-time collaborative code editor for mock interviews</p>
+        <div style={styles.header}>
+          <h1 style={styles.title}>MockPad</h1>
+          <p style={styles.subtitle}>Collaborative code editor for mock interviews</p>
+        </div>
 
-        <button onClick={() => setShowFeatures(true)} style={styles.featuresLink}>
-          See how it works →
-        </button>
-
-        {/* Username */}
+        {/* User Identity */}
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Your name (shown on cursor)"
+          placeholder="Enter your name..."
           style={styles.input}
+          required
         />
 
-        {/* Room config selectors */}
-        <div style={styles.selectGroup}>
-          <div style={styles.selectRow}>
-            <label style={styles.label}>Language</label>
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              style={styles.select}
-            >
-              {LANGUAGES.map((l) => (
-                <option key={l} value={l}>{l}</option>
-              ))}
-            </select>
-          </div>
-          <div style={styles.selectRow}>
-            <label style={styles.label}>Interview type</label>
-            <select
-              value={interviewType}
-              onChange={(e) => setInterviewType(e.target.value)}
-              style={styles.select}
-            >
-              {INTERVIEW_TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
         <button onClick={handleCreate} style={styles.createBtn}>
-          Create new room
+          Create New Room
         </button>
 
         <div style={styles.divider}>
-          <span>or join an existing room</span>
+          <span style={styles.dividerLine} />
+          <span style={styles.dividerText}>or join active</span>
+          <span style={styles.dividerLine} />
         </div>
 
         <form onSubmit={handleJoin} style={styles.form}>
           <input
             value={joinId}
             onChange={(e) => setJoinId(e.target.value)}
-            placeholder="Paste room link or ID..."
-            style={styles.input}
+            placeholder="Paste Room Link or ID..."
+            style={styles.joinInput}
+            required
           />
           <button type="submit" style={styles.joinBtn}>
             Join
@@ -137,108 +99,100 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: '#1e1e1e',
+    background: '#141416',
+    fontFamily: 'system-ui, -apple-system, sans-serif',
   },
   card: {
-    background: '#2d2d2d',
-    border: '1px solid #444',
+    background: '#1D1E22',
+    border: '1px solid #282A30',
     borderRadius: '12px',
-    padding: '48px',
+    padding: '40px',
     width: '100%',
-    maxWidth: '420px',
+    maxWidth: '380px',
     display: 'flex',
     flexDirection: 'column',
     gap: '16px',
+    boxShadow: '0 8px 30px rgba(0,0,0,0.5)',
+  },
+  header: {
+    textAlign: 'center',
+    marginBottom: '8px',
   },
   title: {
     color: '#fff',
     fontSize: '32px',
-    fontWeight: 'bold',
-    fontFamily: 'monospace',
+    fontWeight: '800',
     margin: 0,
-    textAlign: 'center',
+    letterSpacing: '-0.5px',
   },
   subtitle: {
-    color: '#888',
+    color: '#8E9AA8',
     fontSize: '14px',
+    margin: '6px 0 0 0',
+    lineHeight: '1.4',
+  },
+  input: {
+    background: '#141416',
+    border: '1px solid #282A30',
+    borderRadius: '6px',
+    padding: '12px',
+    color: '#FFF',
+    fontSize: '14px',
+    outline: 'none',
     textAlign: 'center',
-    margin: 0,
-    lineHeight: '1.5',
-  },
-  selectGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
-    background: '#1e1e1e',
-    border: '1px solid #444',
-    borderRadius: '8px',
-    padding: '14px',
-  },
-  selectRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  label: {
-    color: '#888',
-    fontSize: '13px',
-  },
-  select: {
-    background: '#3c3c3c',
-    color: '#d4d4d4',
-    border: '1px solid #555',
-    borderRadius: '4px',
-    padding: '5px 10px',
-    fontSize: '13px',
-    minWidth: '140px',
+    transition: 'border-color 0.2s',
   },
   createBtn: {
-    background: '#0e7a0e',
+    background: '#3B82F6',
     color: '#fff',
     border: 'none',
     borderRadius: '6px',
     padding: '12px',
-    fontSize: '15px',
+    fontSize: '14px',
+    fontWeight: '600',
     cursor: 'pointer',
-    fontWeight: 'bold',
+    transition: 'background 0.2s',
   },
   divider: {
     display: 'flex',
     alignItems: 'center',
-    color: '#666',
-    fontSize: '13px',
-    justifyContent: 'center',
+    gap: '10px',
+    margin: '8px 0',
+  },
+  dividerLine: {
+    flex: 1,
+    height: '1px',
+    background: '#282A30',
+  },
+  dividerText: {
+    color: '#636E7B',
+    fontSize: '12px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
   },
   form: {
     display: 'flex',
     gap: '8px',
   },
-  input: {
+  joinInput: {
     flex: 1,
-    background: '#1e1e1e',
-    border: '1px solid #555',
+    background: '#141416',
+    border: '1px solid #282A30',
     borderRadius: '6px',
     padding: '10px 12px',
-    color: '#d4d4d4',
+    color: '#FFF',
     fontSize: '14px',
-    fontFamily: 'monospace',
-  },
-  featuresLink: {
-    background: 'none', border: 'none',
-    color: '#569cd6', fontSize: '13px',
-    cursor: 'pointer', fontFamily: 'monospace',
-    padding: 0, textAlign: 'center',
-    textDecoration: 'underline',
-    textDecorationColor: 'rgba(86,156,214,0.35)',
-    textUnderlineOffset: '3px',
+    outline: 'none',
   },
   joinBtn: {
-    background: '#3c3c3c',
-    color: '#d4d4d4',
-    border: '1px solid #555',
+    background: '#282A30',
+    border: '1px solid #363942',
+    color: '#E6E8EA',
     borderRadius: '6px',
     padding: '10px 16px',
     fontSize: '14px',
+    fontWeight: '600',
     cursor: 'pointer',
+    transition: 'background 0.2s',
   },
 }

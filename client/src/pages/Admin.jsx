@@ -10,6 +10,7 @@ export default function Admin() {
   const [error, setError] = useState(null)
   const [terminating, setTerminating] = useState(null)
   const [passkey, setPasskey] = useState(() => sessionStorage.getItem('mockpad-admin-passkey') || '')
+  const [loginError, setLoginError] = useState(null)
 
   const fetchStats = async () => {
     if (!passkey) {
@@ -23,12 +24,14 @@ export default function Admin() {
       if (res.status === 401) {
         sessionStorage.removeItem('mockpad-admin-passkey')
         setPasskey('')
+        setLoginError('Invalid administrator passkey')
         throw new Error('Unauthorized')
       }
       if (!res.ok) throw new Error('Failed to fetch status')
       const data = await res.json()
       setStats(data)
       setError(null)
+      setLoginError(null)
     } catch (err) {
       setError(err.message)
     } finally {
@@ -74,9 +77,18 @@ export default function Admin() {
         <div style={styles.loginCard}>
           <h2 style={styles.loginTitle}>MockPad Admin Authentication</h2>
           <p style={styles.loginSub}>Enter your administrative passkey to unlock the control node.</p>
+          
+          {loginError && (
+            <div style={{ color: '#EF4444', fontSize: '12px', marginBottom: '14px', fontFamily: 'monospace', fontWeight: 'bold' }}>
+              ⚠ {loginError}
+            </div>
+          )}
+
           <form onSubmit={(e) => {
             e.preventDefault()
             const val = e.target.passkey.value
+            setLoginError(null)
+            setLoading(true)
             sessionStorage.setItem('mockpad-admin-passkey', val)
             setPasskey(val)
           }} style={styles.loginForm}>

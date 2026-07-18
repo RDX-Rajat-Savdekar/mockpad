@@ -5,6 +5,17 @@ import { MonacoBinding } from 'y-monaco'
 
 const WS_SERVER = import.meta.env.VITE_WS_SERVER ?? 'ws://localhost:1234'
 
+class CustomWebSocket extends WebSocket {
+  constructor(url, protocols) {
+    super(url, protocols)
+    this.addEventListener('close', (e) => {
+      if (e.code === 4000) {
+        window.dispatchEvent(new CustomEvent('mockpad-room-terminated'))
+      }
+    })
+  }
+}
+
 // y-monaco creates decoration elements with class names like yRemoteSelection-{clientID}
 // but never injects the actual CSS — we have to do it ourselves.
 function injectCursorStyles(awareness, doc) {
@@ -46,8 +57,16 @@ export function useYjs(roomId, editor, username, color, userId) {
     if (!roomId) return undefined
 
     const doc = new Y.Doc()
-    const provider = new WebsocketProvider(WS_SERVER, roomId, doc)
+    const provider = new WebsocketProvider(WS_SERVER, roomId, doc, {
+      WebSocketPolyfill: CustomWebSocket
+    })
     setConn({ doc, provider })
+
+    const onTerminated = () => {
+      provider.shouldConnect = false
+      try { provider.disconnect() } catch {}
+    }
+    window.addEventListener('mockpad-room-terminated', onTerminated)
     setSynced(false)
     setStatus('connecting')
 
@@ -74,6 +93,7 @@ export function useYjs(roomId, editor, username, color, userId) {
       clearTimeout(stuckTimer)
       window.removeEventListener('pagehide', hardDisconnect)
       window.removeEventListener('beforeunload', hardDisconnect)
+      window.removeEventListener('mockpad-room-terminated', onTerminated)
       provider.off('status', onStatus)
       provider.off('sync', onSync)
       provider.shouldConnect = false
