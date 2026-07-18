@@ -121,7 +121,7 @@ setPersistence({
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-passkey')
 
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }
 
