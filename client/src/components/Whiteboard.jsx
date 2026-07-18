@@ -37,6 +37,10 @@ export default function Whiteboard({ doc, awareness, onApi }) {
   const isRemoteRef = useRef(false)
   const wbMap       = doc.getMap('whiteboard')
 
+  const lastElementsStrRef = useRef('')
+  const throttleTimerRef = useRef(null)
+  const pendingElementsRef = useRef(null)
+
   // Called when Excalidraw is ready — apply defaults and hydrate elements
   const onApiReady = useCallback((api) => {
     apiRef.current = api
@@ -45,9 +49,10 @@ export default function Whiteboard({ doc, awareness, onApi }) {
     api.updateScene({ appState: SYSTEM_DESIGN_DEFAULTS })
     const raw = wbMap.get('elements')
     if (raw) {
+      lastElementsStrRef.current = raw
       try { api.updateScene({ elements: restoreElements(JSON.parse(raw)) }) } catch {}
     }
-  }, [wbMap])
+  }, [wbMap, onApi])
 
   // ── Yjs → Excalidraw (remote changes only) ────────────
   useEffect(() => {
@@ -59,6 +64,7 @@ export default function Whiteboard({ doc, awareness, onApi }) {
       if (!api) return
       const raw = wbMap.get('elements')
       if (!raw) return
+      lastElementsStrRef.current = raw // update last elements string to match remote
       isRemoteRef.current = true
       try {
         api.updateScene({ elements: restoreElements(JSON.parse(raw)) })
@@ -68,7 +74,10 @@ export default function Whiteboard({ doc, awareness, onApi }) {
     }
 
     wbMap.observe(onMapChange)
-    return () => wbMap.unobserve(onMapChange)
+    return () => {
+      wbMap.unobserve(onMapChange)
+      if (throttleTimerRef.current) clearInterval(throttleTimerRef.current)
+    }
   }, [wbMap])
 
   // ── awareness → Excalidraw collaborator cursors ───────
@@ -95,15 +104,40 @@ export default function Whiteboard({ doc, awareness, onApi }) {
     return () => awareness.off('change', onAwarenessChange)
   }, [awareness, doc])
 
+  const syncToYjs = useCallback((elements) => {
+    const serialized = JSON.stringify(elements)
+    if (serialized === lastElementsStrRef.current) return
+    lastElementsStrRef.current = serialized
+    isLocalRef.current = true
+    wbMap.set('elements', serialized)
+    isLocalRef.current = false
+  }, [wbMap])
+
   // ── Excalidraw → Yjs ──────────────────────────────────
   const handleChange = useCallback((elements) => {
     if (isRemoteRef.current) return
-    // Set flag BEFORE wbMap.set so the observer (which fires synchronously)
-    // sees it and skips calling updateScene — this prevents the mid-stroke reset.
-    isLocalRef.current = true
-    wbMap.set('elements', JSON.stringify(elements))
-    isLocalRef.current = false
-  }, [wbMap])
+
+    const serialized = JSON.stringify(elements)
+    if (serialized === lastElementsStrRef.current) return
+
+    pendingElementsRef.current = elements
+
+    if (!throttleTimerRef.current) {
+      // Sync leading edge immediately
+      syncToYjs(elements)
+      pendingElementsRef.current = null
+
+      throttleTimerRef.current = setInterval(() => {
+        if (pendingElementsRef.current) {
+          syncToYjs(pendingElementsRef.current)
+          pendingElementsRef.current = null
+        } else {
+          clearInterval(throttleTimerRef.current)
+          throttleTimerRef.current = null
+        }
+      }, 150)
+    }
+  }, [syncToYjs])
 
   const handlePointerUpdate = useCallback(({ pointer }) => {
     awareness.setLocalStateField('wbPointer', pointer)

@@ -81,6 +81,52 @@ export default function Room() {
   )
   const sharedMap = doc ? doc.getMap('shared') : null
 
+  // Live cursor tracking
+  const [cursors, setCursors] = useState({})
+  const lastCursorTime = useRef(0)
+
+  useEffect(() => {
+    if (!awareness || !doc) return undefined
+    function updateCursors() {
+      const next = {}
+      awareness.getStates().forEach((state, clientID) => {
+        if (clientID === doc.clientID) return
+        const cursor = state.cursor
+        const user = state.user
+        if (cursor && user) {
+          next[clientID] = {
+            name: user.name ?? 'Anonymous',
+            color: user.color ?? '#888',
+            x: cursor.x,
+            y: cursor.y,
+          }
+        }
+      })
+      setCursors(next)
+    }
+    awareness.on('change', updateCursors)
+    return () => {
+      awareness.off('change', updateCursors)
+    }
+  }, [awareness, doc])
+
+  const handleMouseMove = useCallback((e) => {
+    if (!awareness) return
+    const now = Date.now()
+    if (now - lastCursorTime.current < 45) return
+    lastCursorTime.current = now
+
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = (e.clientX - rect.left) / rect.width
+    const y = (e.clientY - rect.top) / rect.height
+    awareness.setLocalStateField('cursor', { x, y })
+  }, [awareness])
+
+  const handleMouseLeave = useCallback(() => {
+    if (!awareness) return
+    awareness.setLocalStateField('cursor', null)
+  }, [awareness])
+
   // Presence
   useEffect(() => {
     if (!awareness || !sharedMap) return undefined
@@ -365,7 +411,63 @@ print(two_sum([3, 2, 4], 6))        # [1, 2]`
   }
 
   return (
-    <div style={styles.container}>
+    <div
+      style={styles.container}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+    >
+      {/* Collaborative cursors */}
+      {Object.entries(cursors).map(([clientID, c]) => (
+        <div
+          key={clientID}
+          style={{
+            position: 'absolute',
+            left: `${c.x * 100}%`,
+            top: `${c.y * 100}%`,
+            pointerEvents: 'none',
+            zIndex: 9999,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            transition: 'left 0.08s ease-out, top 0.08s ease-out',
+          }}
+        >
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            style={{
+              transform: 'translate(-2px, -2px)',
+            }}
+          >
+            <path
+              d="M3 3V20.586L9.293 14.293L17.586 22.586L20.586 19.586L12.293 11.293L18.586 5H3Z"
+              fill={c.color}
+              stroke="white"
+              strokeWidth="2"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <div
+            style={{
+              background: c.color,
+              color: '#000',
+              fontSize: '10px',
+              fontFamily: 'monospace',
+              fontWeight: 'bold',
+              padding: '2px 6px',
+              borderRadius: '3px',
+              whiteSpace: 'nowrap',
+              marginTop: '4px',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+              border: '1px solid rgba(255,255,255,0.4)',
+            }}
+          >
+            {c.name}
+          </div>
+        </div>
+      ))}
 
       {/* Reconnection banner */}
       {connStatus === 'disconnected' && (
@@ -558,6 +660,8 @@ const styles = {
     background: '#1e1e1e',
     color: '#d4d4d4',
     fontFamily: 'monospace',
+    position: 'relative',
+    overflow: 'hidden',
   },
   banner: (status) => ({
     background: status === 'connecting' ? '#4a3a00' : '#4a1a1a',

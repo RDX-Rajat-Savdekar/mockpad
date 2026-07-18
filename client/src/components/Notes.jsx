@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { getUserId, getUsername } from '../utils/roomId'
 
 const MY_ID = getUserId()
@@ -17,6 +17,13 @@ export function NotesPanel({ sharedMap, myRole, peers }) {
   const [isShared, setIsShared] = useState(false)
   const [othersNotes, setOthersNotes] = useState({}) // { [userId]: { name, role, text } }
   const [activeTab, setActiveTab] = useState(MY_ID)
+  const notesTimerRef = useRef(null)
+
+  useEffect(() => {
+    return () => {
+      if (notesTimerRef.current) clearTimeout(notesTimerRef.current)
+    }
+  }, [])
 
   // Sync isShared on mount (in case user refreshed while shared)
   useEffect(() => {
@@ -62,16 +69,21 @@ export function NotesPanel({ sharedMap, myRole, peers }) {
     setMyNotes(text)
     savePrivateNotes(text)
     if (isShared) {
-      sharedMap.set(`sharedNotes-${MY_ID}`, { name: getUsername(), role: myRole, text })
+      if (notesTimerRef.current) clearTimeout(notesTimerRef.current)
+      notesTimerRef.current = setTimeout(() => {
+        sharedMap.set(`sharedNotes-${MY_ID}`, { name: getUsername(), role: myRole, text })
+      }, 500)
     }
   }
 
   function handleShare() {
+    if (notesTimerRef.current) clearTimeout(notesTimerRef.current)
     sharedMap.set(`sharedNotes-${MY_ID}`, { name: getUsername(), role: myRole, text: myNotes })
     setIsShared(true)
   }
 
   function handleUnshare() {
+    if (notesTimerRef.current) clearTimeout(notesTimerRef.current)
     sharedMap.delete(`sharedNotes-${MY_ID}`)
     setIsShared(false)
   }

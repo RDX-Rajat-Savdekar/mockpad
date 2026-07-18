@@ -4,18 +4,20 @@ const { setupWSConnection, setPersistence, docs } = require('y-websocket/bin/uti
 const { LeveldbPersistence } = require('y-leveldb')
 const Y = require('yjs')
 
-// ── Tunables (small droplet: ~1GB RAM) ──────────────────────────────────────
+// ── Tunables (aligned for 256MB Fly.io VM limit) ────────────────────────────
 const INACTIVITY_TTL = 5 * 60 * 1000       // empty room → delete after 5 min
 const HARD_TTL = 90 * 60 * 1000            // absolute max room lifetime (90 min)
 const COMPACT_INTERVAL = 20 * 1000         // coalesce LevelDB history while active
 const MAX_ROOMS = 40                       // concurrent rooms in memory
 const MAX_CONN_PER_ROOM = 8
 const MAX_TOTAL_CONN = 80
-const HEAP_WARN_MB = 250
+const HEAP_WARN_MB = 120                   // Aggressive memory cleanup warning limit
 const HEAP_CHECK_MS = 30 * 1000
 const SWEEP_MS = 60 * 1000
 
 const ldb = new LeveldbPersistence('./storage')
+
+const ADMIN_PASSKEY = process.env.ADMIN_PASSKEY || 'asdf'
 
 const roomConnections = new Map() // roomName -> Set of ws
 const inactivityTimers = new Map()
@@ -30,7 +32,7 @@ function totalConnections() {
 }
 
 function scheduleCompact(docName) {
-  clearTimeout(compactTimers.get(docName))
+  if (compactTimers.has(docName)) return // Throttled: do not reschedule if already queued
   const timer = setTimeout(() => {
     compactTimers.delete(docName)
     ldb.flushDocument(docName).catch((err) => {
@@ -133,6 +135,47 @@ const server = http.createServer((req, res) => {
       heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
       rssMb: Math.round(mem.rss / 1024 / 1024),
       uptimeSec: Math.round(process.uptime()),
+    }))
+    return
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/api/admin/status')) {
+    const header = req.headers['x-passkey']
+    const query = new URL(req.url, `http://${req.headers.host || 'localhost'}`).searchParams.get('passkey')
+    if (header !== ADMIN_PASSKEY && query !== ADMIN_PASSKEY) {
+      res.writeHead(401, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: false, error: 'Unauthorized' }))
+      return
+    }
+
+    const mem = process.memoryUsage()
+    const roomsList = []
+    
+    for (const [name, doc] of docs.entries()) {
+      const conns = roomConnections.get(name)
+      const connCount = conns ? conns.size : 0
+      const createdAt = roomCreatedAt.get(name) || Date.now()
+      const ageMin = Math.round((Date.now() - createdAt) / 60000)
+      const inactiveTimer = inactivityTimers.has(name)
+      
+      roomsList.push({
+        roomId: name,
+        connections: connCount,
+        ageMinutes: ageMin,
+        isInactive: inactiveTimer,
+      })
+    }
+
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      ok: true,
+      system: {
+        heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+        rssMb: Math.round(mem.rss / 1024 / 1024),
+        uptimeSec: Math.round(process.uptime()),
+        totalConnections: totalConnections(),
+      },
+      rooms: roomsList,
     }))
     return
   }
