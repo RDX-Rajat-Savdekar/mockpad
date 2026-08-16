@@ -18,7 +18,7 @@ MockPad is a CoderPad-style interview room. One person creates a room, shares th
 
 There is no database, no user accounts, and no REST API for room state. Every collaborative surface in the app is backed by a single Yjs CRDT document per room, synced over WebSocket and persisted to LevelDB. Rooms are ephemeral by design — they expire automatically and delete themselves, which keeps a 256 MB server able to host meaningful concurrency.
 
----
+--- 
 
 ## Features
   
