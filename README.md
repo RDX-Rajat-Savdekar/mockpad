@@ -25,7 +25,7 @@ There is no database, no user accounts, and no REST API for room state. Every co
 ### For the interview
 - **Collaborative code editor** — Monaco with live cursors and per-user colours, bound to Yjs via `y-monaco`
 - **Run code in-room** — Python, JavaScript, Java, and C++ executed through Judge0, with output synced to every participant
-- **Shared whiteboard** — full Excalidraw canvas with bidirectional CRDT sync, for system design and diagramming
+- **Shared whiteboard** — full Excalidraw canvas with bidirectional CRDT sync, for system design and diagramming    
 - **Voice chat** — peer-to-peer WebRTC audio with mute and local recording; signalling rides on Yjs awareness, so no separate signalling server
 - **Interview timer** — shared start/pause/elapsed state, synchronised across the room
 - **Shared notes** — per-participant note panels, visible to the room and rolled into the final summary
