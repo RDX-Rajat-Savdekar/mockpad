@@ -1,6 +1,7 @@
 # MockPad 📝
 
 > A real-time collaborative coding environment for technical interviews — shared editor, whiteboard, voice, and code execution in a single room, with no sign-up.
+We have real users who actually use our product conducting mock interviews with USC and other Cal schools 
 
 <p align="center">
   <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React 19" />
